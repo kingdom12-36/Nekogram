@@ -217,6 +217,7 @@ import java.util.Locale;
 import me.vkryl.android.animator.BoolAnimator;
 import me.vkryl.android.animator.FactorAnimator;
 import tw.nekomimi.nekogram.NekoConfig;
+import tw.nekomimi.nekogram.helpers.ImeHelper;
 
 public class ChatActivityEnterView extends FrameLayout implements
     NotificationCenter.NotificationCenterDelegate,
@@ -5531,8 +5532,17 @@ public class ChatActivityEnterView extends FrameLayout implements
                     showAiButton(messageEditText.getLineCount() > 2 && messageEditText.getText() != null && !TextUtils.isEmpty(messageEditText.getText().toString().trim()));
                 }
             }
+
+            @Override
+            public boolean onPrivateIMECommand(String action, Bundle data) {
+                if (ImeHelper.handlePrivateIMECommand(this, action, data)) {
+                    return true;
+                }
+                return super.onPrivateIMECommand(action, data);
+            }
         };
         if (parentFragment != null && !isEditingBusinessLink()) {
+            ImeHelper.enableSogouExpression(messageEditText);
             ViewCompat.setOnReceiveContentListener(messageEditText, new String[]{"image/gif", "image/*", "image/jpg", "image/png", "image/webp"}, (view, payload) -> {
                 var split = payload.partition(
                         item -> item.getUri() != null);
