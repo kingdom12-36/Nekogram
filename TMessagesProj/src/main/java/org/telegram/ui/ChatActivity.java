@@ -9093,7 +9093,7 @@ public class ChatActivity extends BaseFragment implements
             }
         }
 
-        if (getDialogId() == getUserConfig().getClientUserId()) {
+        if (getDialogId() == getUserConfig().getClientUserId() && getUserConfig().isPremium()) {
             actionBarSearchTags = new SearchTagsList(context, ChatActivity.this, currentAccount, getSavedDialogId(), themeDelegate) {
                 @Override
                 protected boolean setFilter(ReactionsLayoutInBubble.VisibleReaction reaction) {
