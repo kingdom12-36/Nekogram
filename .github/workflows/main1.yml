@@ -1,0 +1,266 @@
+name: Build OctoGram (Auto-Key Factory)
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          lfs: true
+          fetch-depth: 1
+
+      - name: Checkout Submodules LFS Files
+        run: git submodule foreach --recursive 'git lfs pull'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify Essential Tools
+        run: |
+          git lfs version
+          sed --version
+
+      - name: Linkit Key Factory
+        run: |
+          KEY_NAME="Linkit"
+          PASSWORD="Linkit"
+          sudo mkdir -p /home/octogram/keys
+          sudo chmod -R 777 /home/octogram
+          keytool -genkey -v \
+            -keystore /home/octogram/keys/octogram-key.jks \
+            -alias $KEY_NAME -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass $PASSWORD -keypass $PASSWORD \
+            -dname "CN=Linkit, OU=Dev, O=LinkitFortress, L=Global, S=Security, C=US"
+          printf 'storePassword=%s\nkeyAlias=%s\nkeyPath=%s\nkeyPassword=%s\n' \
+            "$PASSWORD" "$KEY_NAME" "/home/octogram/keys/octogram-key.jks" "$PASSWORD" \
+            > /home/octogram/keys/signing.properties
+
+      - name: Patch Package Name & arm64 Only
+        run: |
+          sed -i 's/^APP_PACKAGE=.*/APP_PACKAGE=org.linkit.octogram/' gradle.properties
+          grep "APP_PACKAGE" gradle.properties
+          sed -i "s/include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'/include 'arm64-v8a'/" TMessagesProj_App/build.gradle
+          TARGET_JSON="TMessagesProj_App/google-services.json"
+          if [ -f "$TARGET_JSON" ]; then
+            sed -i 's/"package_name": "[^"]*"/"package_name": "org.linkit.octogram"/g' "$TARGET_JSON"
+          fi
+
+      - name: Run Repo Setup Script
+        env:
+          TERM: xterm-256color
+          FORCE_COLOR: "1"
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          APP_ID: "org.linkit.octogram"
+          APP_NAME: "OctoGram Linkit"
+          APP_DOWNLOAD_URL: "https://telegram.org/dl"
+          APP_SOURCES_URL: "https://github.com/kingdom12-36/OctoGram"
+        run: |
+          chmod +x scripts/*.sh 2>/dev/null || true
+          mkdir -p /home/runner/bin
+          printf '#!/bin/bash\nexit 0\n' > /home/runner/bin/tput
+          chmod +x /home/runner/bin/tput
+          export PATH=/home/runner/bin:$PATH
+          echo "sign.file=/home/octogram/keys/signing.properties" > local.properties
+          MAPS_KEY="${{ secrets.MAPS_API_KEY }}"
+          [ -z "$MAPS_KEY" ] && MAPS_KEY="AIzaSyDummyKey_Linkit"
+          echo "MAPS_API_KEY=$MAPS_KEY" >> local.properties
+          [ -d "scripts" ] && ./scripts/setup.sh || true
+
+      - name: Fix Gradle Properties
+        run: |
+          [ -f "gradle.properties" ] && sed -i '/android.enableR8/d' gradle.properties || true
+
+      - name: Grant Execute Permission for Gradle
+        run: chmod +x gradlew
+
+      - name: Install Telegram & Send Build Start
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
+        run: |
+          pip install telethon -q
+          cat > /tmp/tg_start.py << 'PYEOF'
+import os, asyncio
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+
+api_id   = int(os.environ['TELEGRAM_API_ID'])
+api_hash = os.environ['TELEGRAM_API_HASH']
+session  = os.environ['TELEGRAM_CLIENT']
+channel  = -1004457565242
+
+async def main():
+    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
+        msg = await c.send_message(channel,
+            '🔨 **OctoGram Linkit** — Build started!
+'
+            '⏱ 0 min... compiling...')
+        print(msg.id)
+
+asyncio.run(main())
+PYEOF
+          MSG_ID=0
+          echo "TELEGRAM_MSG_ID=$MSG_ID" >> $GITHUB_ENV
+          echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
+
+      - name: Build Android App
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
+        run: |
+          cat > /tmp/tg_edit.py << 'PYEOF'
+import os, asyncio, sys
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+
+api_id   = int(os.environ['TELEGRAM_API_ID'])
+api_hash = os.environ['TELEGRAM_API_HASH']
+session  = os.environ['TELEGRAM_CLIENT']
+channel  = -1004457565242
+msg_id   = int(os.environ.get('TELEGRAM_MSG_ID', '0'))
+text     = sys.argv[1]
+
+async def main():
+    if not msg_id:
+        return
+    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
+        try:
+            await c.edit_message(channel, msg_id, text, parse_mode='md')
+        except Exception as e:
+            print('Edit failed:', e)
+
+asyncio.run(main())
+PYEOF
+
+          # Background timer — edits the Telegram message every 5 min
+          (
+            elapsed=5
+            while true; do
+              sleep 300
+              if [ "$elapsed" -ge 20 ]; then
+                TEXT="🔨 **OctoGram Linkit** — Building...
+⏱ ${elapsed} min... 📦 Package should be here soon!"
+              else
+                TEXT="🔨 **OctoGram Linkit** — Building...
+⏱ ${elapsed} min..."
+              fi
+              python3 /tmp/tg_edit.py "$TEXT" 2>/dev/null &
+              elapsed=$((elapsed + 5))
+            done
+          ) &
+          TIMER_PID=$!
+
+          ./gradlew :TMessagesProj_App:assembleRelease \
+            -Pandroid.experimental.jetbrains.kotlin.jvm.target=21 \
+            -Pandroid.antlr.arguments="-w" \
+            -Dorg.gradle.project.android.ndk.cflags="-w" \
+            -Dorg.gradle.project.android.ndk.cppflags="-w" \
+            -Pandroid.injected.testOnly=false \
+            -Pandroid.injected.build.abi=arm64-v8a \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
+            --stacktrace
+
+          kill $TIMER_PID 2>/dev/null || true
+
+      - name: Locate & Stage APK
+        run: |
+          APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -i "arm64" | head -1)
+          [ -z "$APK_PATH" ] && APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | head -1)
+          if [ -n "$APK_PATH" ]; then
+            cp "$APK_PATH" OctoGram-arm64.apk
+            echo "Staged: $APK_PATH"
+            ls -lh OctoGram-arm64.apk
+          else
+            echo "ERROR: No signed APK in outputs/"; exit 1
+          fi
+
+      - name: Upload APK as Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OctoGram-arm64
+          path: OctoGram-arm64.apk
+          retention-days: 30
+
+      - name: Send APK to Telegram Channel
+        continue-on-error: true
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
+        run: |
+          BUILD_SECS=$(( $(date +%s) - ${BUILD_START:-$(date +%s)} ))
+          BUILD_MIN=$((BUILD_SECS / 60))
+          cat > /tmp/tg_done.py << 'PYEOF'
+import os, asyncio
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+
+api_id   = int(os.environ['TELEGRAM_API_ID'])
+api_hash = os.environ['TELEGRAM_API_HASH']
+session  = os.environ['TELEGRAM_CLIENT']
+channel  = -1004457565242
+msg_id   = int(os.environ.get('TELEGRAM_MSG_ID', '0'))
+build_min = os.environ.get('BUILD_MIN', '?')
+
+async def main():
+    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
+        if msg_id:
+            try:
+                await c.edit_message(channel, msg_id,
+                    f'✅ **OctoGram Linkit** — Done in {build_min} min!
+'
+                    f'Package: org.linkit.octogram
+'
+                    f'Arch: arm64-v8a
+'
+                    f'APK incoming below 👇')
+            except Exception as e:
+                print('Edit failed:', e)
+        await c.send_file(channel, 'OctoGram-arm64.apk',
+            caption='**OctoGram Linkit — Latest Build**
+Package: org.linkit.octogram
+Architecture: arm64-v8a
+Built via GitHub Actions',
+            force_document=True)
+        print('APK sent!')
+
+asyncio.run(main())
+PYEOF
+          BUILD_MIN=$BUILD_MIN python3 /tmp/tg_done.py
+
+      - name: Publish to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '## OctoGram Linkit
+
+Package: org.linkit.octogram
+Commit: %s
+
+arm64-v8a only.' "${{ github.sha }}" > release_notes.md
+          gh release delete latest --yes 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+          gh release create latest OctoGram-arm64.apk \
+            --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --notes-file release_notes.md \
+            --latest
