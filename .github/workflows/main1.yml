@@ -81,7 +81,7 @@ jobs:
           echo "sign.file=/home/octogram/keys/signing.properties" > local.properties
           MAPS_KEY="${{ secrets.MAPS_API_KEY }}"
           [ -z "$MAPS_KEY" ] && MAPS_KEY="AIzaSyDummyKey_Linkit"
-          echo "MAPS_API_KEY=$MAPS_KEY" >> local.properties
+          echo "mapsApiKey=$MAPS_KEY" >> local.properties
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
       - name: Fix Gradle Properties
@@ -101,7 +101,6 @@ jobs:
             -Pandroid.injected.testOnly=false \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
             --stacktrace
-
 
       - name: Locate & Stage APK
         run: |
@@ -152,7 +151,5 @@ jobs:
           git push origin :refs/tags/latest 2>/dev/null || true
           gh release create latest OctoGram-arm64.apk \
             --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
-            --notes-file release_notes.md \
-            --latest            --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
             --latest
