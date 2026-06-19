@@ -94,13 +94,14 @@ jobs:
       - name: Build Android App
         run: |
           ./gradlew :TMessagesProj_App:assembleRelease \
-            -Pandroid.experimental.jetbrains.kotlin.jvm.target=21 \
+            --no-configuration-cache \
             -Pandroid.antlr.arguments="-w" \
             -Dorg.gradle.project.android.ndk.cflags="-w" \
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
             -Pandroid.injected.testOnly=false \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
             --stacktrace
+
 
       - name: Locate & Stage APK
         run: |
