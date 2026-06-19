@@ -62,6 +62,47 @@ jobs:
             sed -i 's/"package_name": "[^"]*"/"package_name": "org.linkit.octogram"/g' "$TARGET_JSON"
           fi
 
+      - name: Generate google-services.json
+        run: |
+          TARGET_JSON="TMessagesProj_App/google-services.json"
+          if [ ! -f "$TARGET_JSON" ]; then
+            echo "google-services.json not found — generating a stub..."
+            cat > "$TARGET_JSON" << 'JSON_EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "linkit-octogram",
+              "storage_bucket": "linkit-octogram.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "org.linkit.octogram"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyDummyKey_Linkit_000000000000000000000"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON_EOF
+            echo "Stub google-services.json created for org.linkit.octogram"
+          else
+            echo "google-services.json already exists."
+          fi
+
       - name: Run Repo Setup Script
         env:
           TERM: xterm-256color
