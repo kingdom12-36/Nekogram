@@ -91,99 +91,21 @@ jobs:
       - name: Grant Execute Permission for Gradle
         run: chmod +x gradlew
 
-      - name: Install Telegram & Send Build Start
-        env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
-        run: |
-          pip install telethon -q
-          cat > /tmp/tg_start.py << 'PYEOF'
-import os, asyncio
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-
-api_id   = int(os.environ['TELEGRAM_API_ID'])
-api_hash = os.environ['TELEGRAM_API_HASH']
-session  = os.environ['TELEGRAM_CLIENT']
-channel  = -1004457565242
-
-async def main():
-    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
-        msg = await c.send_message(channel,
-            '🔨 **OctoGram Linkit** — Build started!
-'
-            '⏱ 0 min... compiling...')
-        print(msg.id)
-
-asyncio.run(main())
-PYEOF
-          MSG_ID=0
-          echo "TELEGRAM_MSG_ID=$MSG_ID" >> $GITHUB_ENV
-          echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
-
       - name: Build Android App
-        env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
         run: |
-          cat > /tmp/tg_edit.py << 'PYEOF'
-import os, asyncio, sys
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-
-api_id   = int(os.environ['TELEGRAM_API_ID'])
-api_hash = os.environ['TELEGRAM_API_HASH']
-session  = os.environ['TELEGRAM_CLIENT']
-channel  = -1004457565242
-msg_id   = int(os.environ.get('TELEGRAM_MSG_ID', '0'))
-text     = sys.argv[1]
-
-async def main():
-    if not msg_id:
-        return
-    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
-        try:
-            await c.edit_message(channel, msg_id, text, parse_mode='md')
-        except Exception as e:
-            print('Edit failed:', e)
-
-asyncio.run(main())
-PYEOF
-
-          # Background timer — edits the Telegram message every 5 min
-          (
-            elapsed=5
-            while true; do
-              sleep 300
-              if [ "$elapsed" -ge 20 ]; then
-                TEXT="🔨 **OctoGram Linkit** — Building...
-⏱ ${elapsed} min... 📦 Package should be here soon!"
-              else
-                TEXT="🔨 **OctoGram Linkit** — Building...
-⏱ ${elapsed} min..."
-              fi
-              python3 /tmp/tg_edit.py "$TEXT" 2>/dev/null &
-              elapsed=$((elapsed + 5))
-            done
-          ) &
-          TIMER_PID=$!
-
           ./gradlew :TMessagesProj_App:assembleRelease \
             -Pandroid.experimental.jetbrains.kotlin.jvm.target=21 \
             -Pandroid.antlr.arguments="-w" \
             -Dorg.gradle.project.android.ndk.cflags="-w" \
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
             -Pandroid.injected.testOnly=false \
-            -Pandroid.injected.build.abi=arm64-v8a \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
             --stacktrace
 
-          kill $TIMER_PID 2>/dev/null || true
-
       - name: Locate & Stage APK
         run: |
+          echo "=== Signed APKs in outputs/ ==="
+          find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | sort
           APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -i "arm64" | head -1)
           [ -z "$APK_PATH" ] && APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | head -1)
           if [ -n "$APK_PATH" ]; then
@@ -193,6 +115,14 @@ PYEOF
           else
             echo "ERROR: No signed APK in outputs/"; exit 1
           fi
+
+      - name: Diagnose APK
+        run: |
+          BT="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)"
+          echo "=== FILE ===" && file OctoGram-arm64.apk && ls -lh OctoGram-arm64.apk
+          echo "=== PACKAGE ===" && $BT/aapt dump badging OctoGram-arm64.apk 2>&1 | grep -E "package:|testOnly|native-code|sdkVersion" || true
+          echo "=== SIGNATURE ===" && $BT/apksigner verify --verbose OctoGram-arm64.apk 2>&1 | head -5 || true
+          echo "=== ZIP ===" && (unzip -t OctoGram-arm64.apk > /dev/null 2>&1 && echo "ZIP valid" || echo "ZIP CORRUPT")
 
       - name: Upload APK as Actions Artifact
         uses: actions/upload-artifact@v4
@@ -208,59 +138,20 @@ PYEOF
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
         run: |
-          BUILD_SECS=$(( $(date +%s) - ${BUILD_START:-$(date +%s)} ))
-          BUILD_MIN=$((BUILD_SECS / 60))
-          cat > /tmp/tg_done.py << 'PYEOF'
-import os, asyncio
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-
-api_id   = int(os.environ['TELEGRAM_API_ID'])
-api_hash = os.environ['TELEGRAM_API_HASH']
-session  = os.environ['TELEGRAM_CLIENT']
-channel  = -1004457565242
-msg_id   = int(os.environ.get('TELEGRAM_MSG_ID', '0'))
-build_min = os.environ.get('BUILD_MIN', '?')
-
-async def main():
-    async with TelegramClient(StringSession(session), api_id, api_hash) as c:
-        if msg_id:
-            try:
-                await c.edit_message(channel, msg_id,
-                    f'✅ **OctoGram Linkit** — Done in {build_min} min!
-'
-                    f'Package: org.linkit.octogram
-'
-                    f'Arch: arm64-v8a
-'
-                    f'APK incoming below 👇')
-            except Exception as e:
-                print('Edit failed:', e)
-        await c.send_file(channel, 'OctoGram-arm64.apk',
-            caption='**OctoGram Linkit — Latest Build**
-Package: org.linkit.octogram
-Architecture: arm64-v8a
-Built via GitHub Actions',
-            force_document=True)
-        print('APK sent!')
-
-asyncio.run(main())
-PYEOF
-          BUILD_MIN=$BUILD_MIN python3 /tmp/tg_done.py
+          pip install telethon -q
+          echo "aW1wb3J0IG9zLCBhc3luY2lvCmZyb20gdGVsZXRob24gaW1wb3J0IFRlbGVncmFtQ2xpZW50CmZyb20gdGVsZXRob24uc2Vzc2lvbnMgaW1wb3J0IFN0cmluZ1Nlc3Npb24KCmFwaV9pZCAgID0gaW50KG9zLmVudmlyb25bJ1RFTEVHUkFNX0FQSV9JRCddKQphcGlfaGFzaCA9IG9zLmVudmlyb25bJ1RFTEVHUkFNX0FQSV9IQVNIJ10Kc2Vzc2lvbiAgPSBvcy5lbnZpcm9uWydURUxFR1JBTV9DTElFTlQnXQpjaGFubmVsICA9IC0xMDA0NDU3NTY1MjQyCmNhcHRpb24gID0gJyoqT2N0b0dyYW0gTGlua2l0IC0gTGF0ZXN0IEJ1aWxkKipcblBhY2thZ2U6IG9yZy5saW5raXQub2N0b2dyYW1cbkFyY2hpdGVjdHVyZTogYXJtNjQtdjhhXG5CdWlsdCB2aWEgR2l0SHViIEFjdGlvbnMnCgphc3luYyBkZWYgbWFpbigpOgogICAgYXN5bmMgd2l0aCBUZWxlZ3JhbUNsaWVudChTdHJpbmdTZXNzaW9uKHNlc3Npb24pLCBhcGlfaWQsIGFwaV9oYXNoKSBhcyBjbGllbnQ6CiAgICAgICAgYXdhaXQgY2xpZW50LnNlbmRfZmlsZShjaGFubmVsLCAnT2N0b0dyYW0tYXJtNjQuYXBrJywgY2FwdGlvbj1jYXB0aW9uLCBmb3JjZV9kb2N1bWVudD1UcnVlKQogICAgICAgIHByaW50KCdBUEsgc2VudCB0byBUZWxlZ3JhbSBzdWNjZXNzZnVsbHkhJykKCmFzeW5jaW8ucnVuKG1haW4oKSkK" | base64 -d > /tmp/tg_send.py
+          python3 /tmp/tg_send.py
 
       - name: Publish to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '## OctoGram Linkit
-
-Package: org.linkit.octogram
-Commit: %s
-
-arm64-v8a only.' "${{ github.sha }}" > release_notes.md
+          printf '## OctoGram Linkit\n\nPackage: org.linkit.octogram\nCommit: %s\n\narm64-v8a only.' "${{ github.sha }}" > release_notes.md
           gh release delete latest --yes 2>/dev/null || true
           git push origin :refs/tags/latest 2>/dev/null || true
           gh release create latest OctoGram-arm64.apk \
             --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --notes-file release_notes.md \
+            --latest            --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
             --latest
