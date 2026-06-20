@@ -156,20 +156,22 @@ jobs:
       - name: Grant Execute Permission for Gradle
         run: chmod +x gradlew
 
-      - name: Disable Sentry Upload
+      - name: Enable Sentry Upload
         run: |
-          # Inject Sentry disable flags into gradle.properties — this is the
-          # correct way; the old sed on TMessagesProj_App/build.gradle was a no-op
-          # because that path does not exist on the runner.
-          echo 'sentry.autoUpload=false'                >> gradle.properties
-          echo 'sentry.uploadNativeSymbols=false'       >> gradle.properties
-          echo 'sentry.includeSourceContext=false'      >> gradle.properties
-          echo 'sentry.uploadProguardMapping=false'     >> gradle.properties
-          echo 'sentry.tracingInstrumentation.enabled=false' >> gradle.properties
-          echo "[Sentry] Disabled flags written to gradle.properties:"
+          echo 'sentry.autoUpload=true'                 >> gradle.properties
+          echo 'sentry.uploadNativeSymbols=true'        >> gradle.properties
+          echo 'sentry.includeSourceContext=true'       >> gradle.properties
+          echo 'sentry.uploadProguardMapping=true'      >> gradle.properties
+          echo 'sentry.tracingInstrumentation.enabled=true' >> gradle.properties
+          echo "[Sentry] Enabled flags written to gradle.properties:"
           grep sentry gradle.properties
 
+
       - name: Build Android App
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: 'sham-19'
+          SENTRY_PROJECT: 'android'
         run: |
           ./gradlew :TMessagesProj_App:assembleRelease \
             --no-configuration-cache \
@@ -178,6 +180,7 @@ jobs:
             -Dorg.gradle.project.android.ndk.cflags="-w" \
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
             --stacktrace
+
 
       - name: Locate & Stage APK
         run: |
