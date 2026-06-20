@@ -185,7 +185,13 @@ public abstract class BaseNekoSettingsActivity extends BaseFragment {
         iBlur3Capture = new ViewGroupPartRenderer(listView, contentView, listView::drawChild);
         listView.addEdgeEffectListener(() -> listView.postOnAnimation(this::blur3_InvalidateBlur));
         listView.setSections();
-        listView.setPadding(0, needActionBarPadding() ? ActionBar.getCurrentActionBarHeight() : AndroidUtilities.dp(12), 0, 0);
+        // ── Phase 2: horizontal padding creates floating-card spacing around items
+        listView.setPadding(
+            AndroidUtilities.dp(10),
+            needActionBarPadding() ? ActionBar.getCurrentActionBarHeight() : AndroidUtilities.dp(12),
+            AndroidUtilities.dp(10),
+            AndroidUtilities.dp(10)
+        );
         contentView.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
 
         actionBarBackground = new View(context) {
