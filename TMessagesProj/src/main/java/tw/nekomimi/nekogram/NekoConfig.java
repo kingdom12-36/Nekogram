@@ -949,4 +949,21 @@ public class NekoConfig {
             return 0xff11acfa;
         }
     }
+
+    public static void toggleSaveEditsHistory() {
+        saveEditsHistory = !saveEditsHistory;
+        android.content.SharedPreferences preferences = org.telegram.messenger.ApplicationLoader.applicationContext.getSharedPreferences("nekoconfig", android.app.Activity.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = preferences.edit();
+        editor.putBoolean("saveEditsHistory", saveEditsHistory);
+        editor.apply();
+    }
+
+    public static void toggleShowDeletedMessages() {
+        showDeletedMessages = !showDeletedMessages;
+        android.content.SharedPreferences preferences = org.telegram.messenger.ApplicationLoader.applicationContext.getSharedPreferences("nekoconfig", android.app.Activity.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = preferences.edit();
+        editor.putBoolean("showDeletedMessages", showDeletedMessages);
+        editor.apply();
+    }
+
 }
