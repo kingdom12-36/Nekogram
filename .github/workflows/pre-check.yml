@@ -23,19 +23,21 @@ jobs:
 
           ROOT = Path(".")
           STRINGS_XML = ROOT / "TMessagesProj/src/main/res/values/strings.xml"
+          STRINGS_NEKO = ROOT / "TMessagesProj/src/main/res/values/strings_neko.xml"
+          STRINGS_ACC  = ROOT / "TMessagesProj/src/main/res/values/strings_accessibility.xml"
 
-          # 1. Collect every defined name from strings.xml
+          # 1. Collect every defined name from ALL string files
+          all_string_files = [f for f in [STRINGS_XML, STRINGS_NEKO, STRINGS_ACC] if f.exists()]
           defined = set()
-          if STRINGS_XML.exists():
-              for m in re.finditer(r'name="([^"]+)"', STRINGS_XML.read_text(encoding="utf-8")):
+          for f in all_string_files:
+              for m in re.finditer(r'name="([^"]+)"', f.read_text(encoding="utf-8")):
                   defined.add(m.group(1))
-          print(f"[INFO] strings.xml defines {len(defined)} entries")
+          print(f"[INFO] All string files combined define {len(defined)} unique entries")
 
           # 2. Scan all Java/Kotlin files for ONLY "R.string.XXX" literals
-          #    (100% reliable — no ambiguous getString/getStringInternal patterns)
           ONLY_RSTRING = re.compile(r'\bR\.string\.(\w+)')
 
-          refs = defaultdict(list)   # name -> [(file, lineno)]
+          refs = defaultdict(list)
           java_root = ROOT / "TMessagesProj/src/main/java"
           if java_root.exists():
               for ext in ("*.java", "*.kt"):
@@ -55,16 +57,15 @@ jobs:
           missing = {k: v for k, v in refs.items() if k not in defined}
 
           if not missing:
-              print("\n✅ [PASS] Every R.string.XXX is defined in strings.xml — build will not fail on missing symbols!")
+              print("\n✅ [PASS] Every R.string.XXX is defined — build will not fail on missing symbols!")
               sys.exit(0)
 
-          # Group by file
           by_file = defaultdict(list)
           for name, locs in missing.items():
               for (f, ln) in locs:
                   by_file[f].append((ln, name))
 
-          print(f"\n❌ [FAIL] {len(missing)} R.string.XXX references have NO matching entry in strings.xml:\n")
+          print(f"\n❌ [FAIL] {len(missing)} R.string.XXX references have NO matching entry:\n")
           for fname in sorted(by_file):
               hits = sorted(by_file[fname])
               print(f"  📄 {fname}")
@@ -80,33 +81,82 @@ jobs:
           sys.exit(1)
           PYEOF
 
-      - name: Check XML well-formedness
-        if: always()
-        run: |
-          python3 -c "
-          import xml.etree.ElementTree as ET, sys
-          try:
-              ET.parse('TMessagesProj/src/main/res/values/strings.xml')
-              print('✅ [PASS] strings.xml is valid XML')
-          except ET.ParseError as e:
-              print('❌ [FAIL] strings.xml parse error:', e)
-              sys.exit(1)
-          "
-
-      - name: Check for duplicate string names
+      - name: Check XML well-formedness (all string files)
         if: always()
         run: |
           python3 << 'PYEOF'
-          import re
+          import xml.etree.ElementTree as ET, sys
           from pathlib import Path
-          from collections import Counter
 
-          content = Path("TMessagesProj/src/main/res/values/strings.xml").read_text(encoding="utf-8")
-          dupes = {k: v for k, v in Counter(re.findall(r'name="([^"]+)"', content)).items() if v > 1}
-          if not dupes:
-              print("✅ [PASS] No duplicate string names")
+          files = [
+              "TMessagesProj/src/main/res/values/strings.xml",
+              "TMessagesProj/src/main/res/values/strings_neko.xml",
+              "TMessagesProj/src/main/res/values/strings_accessibility.xml",
+          ]
+          failed = False
+          for f in files:
+              p = Path(f)
+              if not p.exists():
+                  print(f"⚠️  [SKIP] {f} not found")
+                  continue
+              try:
+                  ET.parse(f)
+                  print(f"✅ [PASS] {f} is valid XML")
+              except ET.ParseError as e:
+                  print(f"❌ [FAIL] {f} parse error: {e}")
+                  failed = True
+          if failed:
+              sys.exit(1)
+          PYEOF
+
+      - name: Check for duplicate string names (within each file AND across files)
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import re, sys
+          from pathlib import Path
+          from collections import Counter, defaultdict
+
+          files = {
+              "strings.xml":              "TMessagesProj/src/main/res/values/strings.xml",
+              "strings_neko.xml":         "TMessagesProj/src/main/res/values/strings_neko.xml",
+              "strings_accessibility.xml":"TMessagesProj/src/main/res/values/strings_accessibility.xml",
+          }
+
+          failed = False
+
+          # ── Within-file duplicates ──────────────────────────────────────────
+          all_names = defaultdict(list)   # name -> [file, file, ...]
+          for label, path in files.items():
+              p = Path(path)
+              if not p.exists():
+                  continue
+              names = re.findall(r'name="([^"]+)"', p.read_text(encoding="utf-8"))
+              counts = Counter(names)
+              dupes = {k: v for k, v in counts.items() if v > 1}
+              if dupes:
+                  print(f"❌ [FAIL] Within-file duplicates in {label} ({len(dupes)} names):")
+                  for name, count in sorted(dupes.items()):
+                      print(f"    {name}  (×{count})")
+                  failed = True
+              else:
+                  print(f"✅ [PASS] No within-file duplicates in {label}")
+              for name in set(names):
+                  all_names[name].append(label)
+
+          # ── Cross-file duplicates ───────────────────────────────────────────
+          cross = {name: files_list for name, files_list in all_names.items() if len(files_list) > 1}
+          if cross:
+              print(f"\n❌ [FAIL] {len(cross)} string name(s) defined in MULTIPLE files")
+              print("   Android merges all values/ XML files — duplicates cause a build failure!\n")
+              for name in sorted(cross):
+                  print(f"    {name}  →  {' + '.join(sorted(cross[name]))}")
+              print(f"\n💡 [FIX] Remove the duplicate entries from strings.xml")
+              print(f"   (keep the definitions in strings_neko.xml / strings_accessibility.xml)")
+              failed = True
           else:
-              print(f"⚠️  [WARN] {len(dupes)} duplicate name(s) — may silently override each other:")
-              for name, count in sorted(dupes.items()):
-                  print(f"    {name}  (×{count})")
+              print("✅ [PASS] No cross-file duplicate string names")
+
+          if failed:
+              sys.exit(1)
           PYEOF
