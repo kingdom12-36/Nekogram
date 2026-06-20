@@ -177,9 +177,6 @@ jobs:
             -Pandroid.antlr.arguments="-w" \
             -Dorg.gradle.project.android.ndk.cflags="-w" \
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
-            -x uploadSentryProguardMappingsRelease \
-            -x uploadSentryNativeSymbolsForRelease \
-            -x sentryUploadSourceContextRelease \
             --stacktrace
 
       - name: Locate & Stage APK
