@@ -1,5 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-	<solid android:color="#282e31"/>
-	<corners android:radius="@dimen/custom_notification_corner_radius"/>
-</shape>
+<!--
+  Floating call notification background — Phase 1 3D/Float redesign.
+  Gradient body gives depth; top stroke acts as rim light (lit-from-above).
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Ambient shadow — slightly offset below the card -->
+    <item
+        android:left="2dp"
+        android:top="6dp"
+        android:right="0dp"
+        android:bottom="0dp">
+        <shape>
+            <solid android:color="#3A000000"/>
+            <corners android:radius="@dimen/custom_notification_corner_radius"/>
+        </shape>
+    </item>
+
+    <!-- Card surface with linear gradient (dark top → slightly lighter bottom) -->
+    <item
+        android:left="0dp"
+        android:top="0dp"
+        android:right="2dp"
+        android:bottom="6dp">
+        <shape>
+            <gradient
+                android:startColor="#2E3538"
+                android:endColor="#1C2124"
+                android:angle="270"/>
+            <corners android:radius="@dimen/custom_notification_corner_radius"/>
+            <!-- Rim light: thin white stroke on top edge — simulates a 3D surface
+                 catching ambient light from above -->
+            <stroke
+                android:width="1dp"
+                android:color="#22FFFFFF"/>
+        </shape>
+    </item>
+
+</layer-list>
