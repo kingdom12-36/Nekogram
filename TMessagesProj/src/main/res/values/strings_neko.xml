@@ -330,6 +330,61 @@
     <string name="FrontCamera">Front Camera</string>
     <string name="RearCamera">Rear Camera</string>
 
+
+    <!-- ── Missing defaults: locale files define these but no English default existed ── -->
+
+    <!-- Plural forms: _few/_many/_two/_zero need a default even though English only uses _one/_other -->
+    <string name="Languages_zero">No Languages</string>
+    <string name="Languages_two">%1$d Languages</string>
+    <string name="Languages_few">%1$d Languages</string>
+    <string name="Languages_many">%1$d Languages</string>
+
+    <string name="AddManyMembersAlertTitle_two">Add %1$d members</string>
+    <string name="AddManyMembersAlertTitle_few">Add %1$d members</string>
+    <string name="AddManyMembersAlertTitle_many">Add %1$d members</string>
+
+    <string name="AddManyMembersAlertNamesText_two">Are you sure you want to add %1$d members to **%2$s**?</string>
+    <string name="AddManyMembersAlertNamesText_few">Are you sure you want to add %1$d members to **%2$s**?</string>
+
+    <!-- Date formatter patterns -->
+    <string name="formatterMonthName">MMMM</string>
+    <string name="formatterMonthYear2">MMMM yyyy</string>
+
+    <!-- Notification settings -->
+    <string name="EnableResidentNotification">Enable Resident Notification</string>
+    <string name="DisableResidentNotification">Disable Resident Notification</string>
+
+    <!-- Auth / email flow -->
+    <string name="EmailPasswordConfirmText3">Please check your email and follow the link we sent you.</string>
+    <string name="YourEmailCode">Your Email Code</string>
+    <string name="YourEmailCodeInfo">Enter the code sent to your email address.</string>
+    <string name="PleaseEnterPassword">Please enter your password</string>
+    <string name="PleaseEnterFirstPassword">Please enter your new password</string>
+    <string name="YourPasswordSuccessText">Your password has been set successfully.</string>
+
+    <!-- Account reset -->
+    <string name="ResetAccountButton">Reset Account</string>
+    <string name="ResetMyAccountText">Reset my account</string>
+
+    <!-- Contacts screen -->
+    <string name="NoContactsYet">No Contacts Yet</string>
+    <string name="NoContactsYetLine1">Your contacts will appear here</string>
+    <string name="NoContactsYetLine2">Add friends to start chatting</string>
+    <string name="NoContactsYetLine3">Find people nearby</string>
+
+    <!-- Sharing -->
+    <string name="ShareTelegram">Share Telegram</string>
+
+    <!-- Chat history -->
+    <string name="ViewHistory">View History</string>
+
+    <!-- Widget passcode -->
+    <string name="WidgetPasscodeEnable2">Enable Widget Passcode</string>
+
+    <!-- Proxy / WebSocket settings -->
+    <string name="WsEnableTls">Enable TLS</string>
+    <string name="WsProvider">WebSocket Provider</string>
+
     <!-- Accessibility -->
     <string name="AccessibilitySettings">Accessibility settings</string>
 </resources>
