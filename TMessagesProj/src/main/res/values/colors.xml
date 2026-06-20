@@ -12,4 +12,13 @@
     <color name="color_compose">#58a3dc</color>
     <color name="color_user">#f5f5f5</color>
     <color name="color_book">#e9eff5</color>
+
+    <!-- Nekogram 3D / Float design tokens -->
+    <color name="neko_float_shadow_hard">#40000000</color>
+    <color name="neko_float_shadow_soft">#20000000</color>
+    <color name="neko_float_rim_light">#1AFFFFFF</color>
+    <color name="neko_float_surface">#FF1A1D26</color>
+    <color name="neko_float_surface_raised">#FF252836</color>
+    <color name="neko_float_accent">#FF4A90D9</color>
+    <color name="neko_float_accent_deep">#FF2A5FA8</color>
 </resources>
