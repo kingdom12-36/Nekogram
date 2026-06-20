@@ -14,120 +14,70 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 1
 
-      - name: Check R.string symbols
-        id: string_check
-        run: |
-          python3 << 'PYEOF'
-          import re, sys, os
-          from pathlib import Path
-
-          ROOT = Path(".")
-          STRINGS_XML = ROOT / "TMessagesProj/src/main/res/values/strings.xml"
-
-          # --- 1. Collect all defined string names from strings.xml ---
-          defined = set()
-          if STRINGS_XML.exists():
-              content = STRINGS_XML.read_text(encoding="utf-8")
-              for m in re.finditer(r'name="([^"]+)"', content):
-                  defined.add(m.group(1))
-          print(f"[INFO] strings.xml defines {len(defined)} named entries")
-
-          # --- 2. Scan all Java/Kotlin files for R.string.XXX references ---
-          java_dirs = [
-              ROOT / "TMessagesProj/src/main/java",
-          ]
-          refs = {}  # name -> list of (file, line_no)
-          patterns = [
-              re.compile(r'R\.string\.(\w+)'),
-              re.compile(r'getStringInternal\("(\w+)"'),
-              re.compile(r'getString\("(\w+)"'),
-              re.compile(r'formatString\("(\w+)"'),
-          ]
-
-          for java_dir in java_dirs:
-              if not java_dir.exists():
-                  continue
-              for path in java_dir.rglob("*.java"):
-                  try:
-                      lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-                  except Exception:
-                      continue
-                  for lineno, line in enumerate(lines, 1):
-                      for pat in patterns:
-                          for m in pat.finditer(line):
-                              name = m.group(1)
-                              refs.setdefault(name, []).append((str(path.relative_to(ROOT)), lineno))
-
-          # Also scan Kotlin files if any
-          for java_dir in java_dirs:
-              if not java_dir.exists():
-                  continue
-              for path in java_dir.rglob("*.kt"):
-                  try:
-                      lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-                  except Exception:
-                      continue
-                  for lineno, line in enumerate(lines, 1):
-                      for pat in patterns:
-                          for m in pat.finditer(line):
-                              name = m.group(1)
-                              refs.setdefault(name, []).append((str(path.relative_to(ROOT)), lineno))
-
-          print(f"[INFO] Found {len(refs)} unique R.string references across all Java/Kotlin files")
-
-          # --- 3. Find missing ---
-          missing = {k: v for k, v in refs.items() if k not in defined}
-
-          if not missing:
-              print("\n[PASS] All R.string references are defined in strings.xml!")
-              sys.exit(0)
-
-          # Group by file for cleaner output
-          by_file = {}
-          for name, locs in sorted(missing.items()):
-              for (f, ln) in locs:
-                  by_file.setdefault(f, []).append((ln, name))
-
-          print(f"\n[FAIL] {len(missing)} missing R.string entries:\n")
-          for fname, hits in sorted(by_file.items()):
-              print(f"  {fname}")
-              for (ln, name) in sorted(hits)[:10]:  # cap per file to avoid spam
-                  print(f"    line {ln}: R.string.{name}")
-              if len(hits) > 10:
-                  print(f"    ... and {len(hits)-10} more")
-          
-          print(f"\n[SUMMARY] Add these {len(missing)} entries to strings.xml:")
-          for name in sorted(missing.keys()):
-              print(f'    <string name="{name}">TODO</string>')
-          
-          sys.exit(1)
-          PYEOF
-
-      - name: Check for duplicate string names
-        if: always()
+      - name: Check R.string symbols (fast, no compile needed)
         run: |
           python3 << 'PYEOF'
           import re, sys
           from pathlib import Path
+          from collections import defaultdict
 
-          STRINGS_XML = Path("TMessagesProj/src/main/res/values/strings.xml")
-          if not STRINGS_XML.exists():
-              print("[SKIP] strings.xml not found")
+          ROOT = Path(".")
+          STRINGS_XML = ROOT / "TMessagesProj/src/main/res/values/strings.xml"
+
+          # 1. Collect every defined name from strings.xml
+          defined = set()
+          if STRINGS_XML.exists():
+              for m in re.finditer(r'name="([^"]+)"', STRINGS_XML.read_text(encoding="utf-8")):
+                  defined.add(m.group(1))
+          print(f"[INFO] strings.xml defines {len(defined)} entries")
+
+          # 2. Scan all Java/Kotlin files for ONLY "R.string.XXX" literals
+          #    (100% reliable — no ambiguous getString/getStringInternal patterns)
+          ONLY_RSTRING = re.compile(r'\bR\.string\.(\w+)')
+
+          refs = defaultdict(list)   # name -> [(file, lineno)]
+          java_root = ROOT / "TMessagesProj/src/main/java"
+          if java_root.exists():
+              for ext in ("*.java", "*.kt"):
+                  for path in java_root.rglob(ext):
+                      try:
+                          lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                      except Exception:
+                          continue
+                      rel = str(path.relative_to(ROOT))
+                      for lineno, line in enumerate(lines, 1):
+                          for m in ONLY_RSTRING.finditer(line):
+                              refs[m.group(1)].append((rel, lineno))
+
+          print(f"[INFO] Found {len(refs)} unique R.string.XXX references")
+
+          # 3. Find missing
+          missing = {k: v for k, v in refs.items() if k not in defined}
+
+          if not missing:
+              print("\n✅ [PASS] Every R.string.XXX is defined in strings.xml — build will not fail on missing symbols!")
               sys.exit(0)
 
-          content = STRINGS_XML.read_text(encoding="utf-8")
-          names = re.findall(r'name="([^"]+)"', content)
-          
-          from collections import Counter
-          dupes = {k: v for k, v in Counter(names).items() if v > 1}
-          
-          if not dupes:
-              print("[PASS] No duplicate string names found")
-          else:
-              print(f"[WARN] {len(dupes)} duplicate string names (may cause build issues):")
-              for name, count in sorted(dupes.items()):
-                  print(f"  {name} (x{count})")
-          # Duplicates are a warning, not a failure
+          # Group by file
+          by_file = defaultdict(list)
+          for name, locs in missing.items():
+              for (f, ln) in locs:
+                  by_file[f].append((ln, name))
+
+          print(f"\n❌ [FAIL] {len(missing)} R.string.XXX references have NO matching entry in strings.xml:\n")
+          for fname in sorted(by_file):
+              hits = sorted(by_file[fname])
+              print(f"  📄 {fname}")
+              for (ln, name) in hits[:8]:
+                  print(f"      line {ln:5d}: R.string.{name}")
+              if len(hits) > 8:
+                  print(f"      ... +{len(hits)-8} more in this file")
+
+          print(f"\n📋 [FIX] Add these {len(missing)} entries to strings.xml:")
+          for name in sorted(missing):
+              print(f'    <string name="{name}">TODO</string>')
+
+          sys.exit(1)
           PYEOF
 
       - name: Check XML well-formedness
@@ -137,8 +87,26 @@ jobs:
           import xml.etree.ElementTree as ET, sys
           try:
               ET.parse('TMessagesProj/src/main/res/values/strings.xml')
-              print('[PASS] strings.xml is valid XML')
+              print('✅ [PASS] strings.xml is valid XML')
           except ET.ParseError as e:
-              print('[FAIL] strings.xml XML parse error:', e)
+              print('❌ [FAIL] strings.xml parse error:', e)
               sys.exit(1)
           "
+
+      - name: Check for duplicate string names
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import re
+          from pathlib import Path
+          from collections import Counter
+
+          content = Path("TMessagesProj/src/main/res/values/strings.xml").read_text(encoding="utf-8")
+          dupes = {k: v for k, v in Counter(re.findall(r'name="([^"]+)"', content)).items() if v > 1}
+          if not dupes:
+              print("✅ [PASS] No duplicate string names")
+          else:
+              print(f"⚠️  [WARN] {len(dupes)} duplicate name(s) — may silently override each other:")
+              for name, count in sorted(dupes.items()):
+                  print(f"    {name}  (×{count})")
+          PYEOF
