@@ -93,6 +93,7 @@ public class NekoConfig {
     public static int transcribeProvider = TRANSCRIBE_PREMIUM;
     public static String cfAccountID = "";
     public static String cfApiToken = "";
+    public static boolean linkitAiEnabled = true;
     public static int cameraInVideoMessages = CAMERA_FRONT;
 
     public static boolean showAddToSavedMessages = true;
@@ -253,6 +254,7 @@ public class NekoConfig {
             bottomFilterTabs = preferences.getBoolean("bottomFilterTabs", false);
             strokeOnViews = preferences.getBoolean("strokeOnViews", true);
             cameraInVideoMessages = preferences.getInt("cameraInVideoMessages", CAMERA_FRONT);
+            linkitAiEnabled = preferences.getBoolean("linkitAiEnabled", true);
 
             LensHelper.checkLensSupportAsync();
             preferences.registerOnSharedPreferenceChangeListener(listener);
@@ -424,6 +426,15 @@ public class NekoConfig {
         SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("nekoconfig", Activity.MODE_PRIVATE);
         SharedPreferences.Editor editor = preferences.edit();
         editor.putBoolean("strokeOnViews", strokeOnViews);
+        editor.apply();
+    }
+
+
+    public static void toggleLinkitAiEnabled() {
+        linkitAiEnabled = !linkitAiEnabled;
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("nekoconfig", Activity.MODE_PRIVATE);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putBoolean("linkitAiEnabled", linkitAiEnabled);
         editor.apply();
     }
 
