@@ -23581,6 +23581,22 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         if (transitionParams.animateBackgroundBoundsInner && !(currentMessageObject != null && currentMessageObject.preview)) {
             drawOverlays(canvas);
         }
+        // Nekogram: Show Deleted Messages badge
+        if (currentMessageObject != null && currentMessageObject.octoRetainedDeleted) {
+            android.graphics.Paint delBadgePaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            delBadgePaint.setColor(0xFFe53935);
+            android.graphics.Paint delTextPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            delTextPaint.setColor(0xFFFFFFFF);
+            delTextPaint.setTextSize(AndroidUtilities.dp(9));
+            String delText = LocaleController.getString(org.telegram.messenger.R.string.NekoShowDeletedMessages);
+            float tw = delTextPaint.measureText(delText);
+            int px = AndroidUtilities.dp(6);
+            float bx = getX() + getWidth() - AndroidUtilities.dp(8) - tw - px * 2;
+            float by = getY() + getHeight() - AndroidUtilities.dp(8) - AndroidUtilities.dp(16);
+            android.graphics.RectF bRect = new android.graphics.RectF(bx, by, bx + tw + px * 2, by + AndroidUtilities.dp(16));
+            canvas.drawRoundRect(bRect, AndroidUtilities.dp(3), AndroidUtilities.dp(3), delBadgePaint);
+            canvas.drawText(delText, bRect.left + px, bRect.bottom - AndroidUtilities.dp(4), delTextPaint);
+        }
 
         if (effectDrawable != null) {
             if (effectDrawableBounce == null) {
