@@ -252,6 +252,10 @@
          ═══════════════════════════════════════════════════════════════ -->
 
     <!-- Floating card — use as background on any elevated container -->
+    <!-- Base floating-surface namespace — child styles inherit from this -->
+    <style name="Neko.Float" parent="">
+    </style>
+
     <style name="Neko.Float.Card">
         <item name="android:background">@drawable/neko_float_card</item>
         <item name="android:elevation">8dp</item>
