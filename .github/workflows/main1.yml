@@ -48,9 +48,6 @@ jobs:
             -alias $KEY_NAME -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass $PASSWORD -keypass $PASSWORD \
             -dname "CN=Linkit, OU=Dev, O=LinkitFortress, L=Global, S=Security, C=US"
-          printf 'storePassword=%s\nkeyAlias=%s\nkeyPath=%s\nkeyPassword=%s\n' \
-            "$PASSWORD" "$KEY_NAME" "/home/octogram/keys/octogram-key.jks" "$PASSWORD" \
-            > /home/octogram/keys/signing.properties
 
       - name: Patch Package Name & arm64 Only
         run: |
@@ -119,10 +116,15 @@ jobs:
           printf '#!/bin/bash\nexit 0\n' > /home/runner/bin/tput
           chmod +x /home/runner/bin/tput
           export PATH=/home/runner/bin:$PATH
-          echo "sign.file=/home/octogram/keys/signing.properties" > local.properties
           MAPS_KEY="${{ secrets.MAPS_API_KEY }}"
           [ -z "$MAPS_KEY" ] && MAPS_KEY="AIzaSyDummyKey_Linkit"
-          echo "mapsApiKey=$MAPS_KEY" >> local.properties
+          {
+            echo "storeFile=/home/octogram/keys/octogram-key.jks"
+            echo "storePassword=Linkit"
+            echo "keyAlias=Linkit"
+            echo "keyPassword=Linkit"
+            echo "mapsApiKey=$MAPS_KEY"
+          } > local.properties
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
       - name: Fix Gradle Properties
@@ -141,6 +143,9 @@ jobs:
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
             -Pandroid.injected.testOnly=false \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
+            -x sentryBundleSourcesRelease \
+            -x sentryUploadNativeSymbolsRelease \
+            -x sentryCollectSourcesRelease \
             --stacktrace
 
       - name: Locate & Stage APK
