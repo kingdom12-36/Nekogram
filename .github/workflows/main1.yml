@@ -158,8 +158,16 @@ jobs:
 
       - name: Disable Sentry Upload
         run: |
-          sed -i 's/uploadNativeSymbols = true/uploadNativeSymbols = false/' TMessagesProj_App/build.gradle || true
-          sed -i 's/includeSourceContext = true/includeSourceContext = false/' TMessagesProj_App/build.gradle || true
+          # Inject Sentry disable flags into gradle.properties — this is the
+          # correct way; the old sed on TMessagesProj_App/build.gradle was a no-op
+          # because that path does not exist on the runner.
+          echo 'sentry.autoUpload=false'                >> gradle.properties
+          echo 'sentry.uploadNativeSymbols=false'       >> gradle.properties
+          echo 'sentry.includeSourceContext=false'      >> gradle.properties
+          echo 'sentry.uploadProguardMapping=false'     >> gradle.properties
+          echo 'sentry.tracingInstrumentation.enabled=false' >> gradle.properties
+          echo "[Sentry] Disabled flags written to gradle.properties:"
+          grep sentry gradle.properties
 
       - name: Build Android App
         run: |
@@ -169,6 +177,9 @@ jobs:
             -Pandroid.antlr.arguments="-w" \
             -Dorg.gradle.project.android.ndk.cflags="-w" \
             -Dorg.gradle.project.android.ndk.cppflags="-w" \
+            -x uploadSentryProguardMappingsRelease \
+            -x uploadSentryNativeSymbolsForRelease \
+            -x sentryUploadSourceContextRelease \
             --stacktrace
 
       - name: Locate & Stage APK
