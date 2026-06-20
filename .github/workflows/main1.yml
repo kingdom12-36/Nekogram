@@ -25,9 +25,24 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
+
+      - name: Setup Gradle (Safe Cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Only save cache when build succeeds — prevents bad state from being stored
+          cache-cleanup: on-success
+          # Cache only safe, immutable things (downloads/wrapper); exclude build-cache
+          # so a failed compile never poisons the next run
+          gradle-home-cache-includes: |
+            caches/modules-2
+            caches/transforms-3
+            wrapper
+          gradle-home-cache-excludes: |
+            caches/build-cache-*
+            caches/journal-*
+            caches/configuration-cache
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -129,11 +144,17 @@ jobs:
 
       - name: Fix Gradle Properties
         run: |
+          # Remove any conflicting R8 flag
           [ -f "gradle.properties" ] && sed -i '/android.enableR8/d' gradle.properties || true
+          # Force real release APK — not testOnly, not debug-installable
+          echo 'android.injected.testOnly=false' >> gradle.properties
+          # Give Gradle more memory (runner has ~7 GB RAM)
+          echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8' >> gradle.properties
+          echo 'org.gradle.parallel=true' >> gradle.properties
+          echo 'org.gradle.daemon=false' >> gradle.properties
 
       - name: Grant Execute Permission for Gradle
         run: chmod +x gradlew
-
 
       - name: Disable Sentry Upload
         run: |
@@ -141,8 +162,14 @@ jobs:
           sed -i 's/includeSourceContext = true/includeSourceContext = false/' TMessagesProj_App/build.gradle || true
 
       - name: Build Android App
-        run: ./gradlew :TMessagesProj_App:assembleRelease --no-configuration-cache -Pandroid.antlr.arguments="-w" -Dorg.gradle.project.android.ndk.cflags="-w" -Dorg.gradle.project.android.ndk.cppflags="-w" -Pandroid.injected.testOnly=false -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" --stacktrace
-
+        run: |
+          ./gradlew :TMessagesProj_App:assembleRelease \
+            --no-configuration-cache \
+            -Pandroid.injected.testOnly=false \
+            -Pandroid.antlr.arguments="-w" \
+            -Dorg.gradle.project.android.ndk.cflags="-w" \
+            -Dorg.gradle.project.android.ndk.cppflags="-w" \
+            --stacktrace
 
       - name: Locate & Stage APK
         run: |
