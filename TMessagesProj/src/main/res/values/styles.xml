@@ -246,4 +246,37 @@
         <item name="android:textColor">@color/widget_badge</item>
     </style>
 
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         Nekogram 3D / Float styles — Phase 1
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Floating card — use as background on any elevated container -->
+    <style name="Neko.Float.Card">
+        <item name="android:background">@drawable/neko_float_card</item>
+        <item name="android:elevation">8dp</item>
+        <item name="android:padding">12dp</item>
+    </style>
+
+    <!-- Floating button — drop-in replacement for flat primary buttons -->
+    <style name="Neko.Float.Button">
+        <item name="android:background">@drawable/neko_float_btn</item>
+        <item name="android:elevation">6dp</item>
+        <item name="android:paddingLeft">20dp</item>
+        <item name="android:paddingRight">20dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <!-- Floating bottom sheet handle area -->
+    <style name="Neko.Float.BottomSheet">
+        <item name="android:background">@drawable/neko_float_card</item>
+        <item name="android:elevation">12dp</item>
+        <item name="android:paddingTop">8dp</item>
+    </style>
+
 </resources>
