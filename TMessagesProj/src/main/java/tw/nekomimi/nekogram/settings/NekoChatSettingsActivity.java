@@ -79,6 +79,8 @@ public class NekoChatSettingsActivity extends BaseNekoSettingsActivity implement
     private final int preferOriginalQualityRow = rowId++;
     private final int cameraInVideoMessagesRow = rowId++;
 
+    private final int showDeletedMessagesRow = rowId++;
+    private final int saveEditsHistoryRow = rowId++;
     private final int messageMenuRow = 100;
 
     @Override
@@ -200,6 +202,8 @@ public class NekoChatSettingsActivity extends BaseNekoSettingsActivity implement
                     LocaleController.getString(R.string.RearCamera);
             default -> LocaleController.getString(R.string.FrontCamera);
         }).slug("cameraInVideoMessages"));
+        items.add(UItem.asCheck(showDeletedMessagesRow, LocaleController.getString(R.string.NekoShowDeletedMessages), LocaleController.getString(R.string.NekoShowDeletedMessages_Desc)).slug("showDeletedMessages").setChecked(NekoConfig.showDeletedMessages));
+        items.add(UItem.asCheck(saveEditsHistoryRow, LocaleController.getString(R.string.NekoSaveEditsHistory), LocaleController.getString(R.string.NekoSaveEditsHistory_Desc)).slug("saveEditsHistory").setChecked(NekoConfig.saveEditsHistory));
         items.add(UItem.asShadow(null));
 
         items.add(UItem.asHeader(LocaleController.getString(R.string.MessageMenu)));
@@ -221,7 +225,17 @@ public class NekoChatSettingsActivity extends BaseNekoSettingsActivity implement
     @Override
     protected void onItemClick(UItem item, View view, int position, float x, float y) {
         var id = item.id;
-        if (id == ignoreBlockedRow) {
+        if (id == showDeletedMessagesRow) {
+            NekoConfig.toggleShowDeletedMessages();
+            if (view instanceof TextCheckCell) {
+                ((TextCheckCell) view).setChecked(NekoConfig.showDeletedMessages);
+            }
+        } else if (id == saveEditsHistoryRow) {
+            NekoConfig.toggleSaveEditsHistory();
+            if (view instanceof TextCheckCell) {
+                ((TextCheckCell) view).setChecked(NekoConfig.saveEditsHistory);
+            }
+        } else if (id == ignoreBlockedRow) {
             NekoConfig.toggleIgnoreBlocked();
             if (view instanceof TextCheckCell) {
                 ((TextCheckCell) view).setChecked(NekoConfig.ignoreBlocked);
