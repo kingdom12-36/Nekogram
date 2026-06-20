@@ -88,6 +88,17 @@ public class NekoSettingsActivity extends BaseNekoSettingsActivity implements Fa
             actionBar.setBackButtonImage(R.drawable.ic_ab_close);
         }
         topView = new FrameLayout(context);
+        // ── Phase 2: 3D floating card header ────────────────────────────────
+        // Rounded white/dark card background matches the app theme automatically
+        topView.setBackground(
+            Theme.createRoundRectDrawable(AndroidUtilities.dp(20), getThemedColor(Theme.key_windowBackgroundWhite))
+        );
+        // Elevation drives the real Material shadow on API 21+
+        topView.setElevation(AndroidUtilities.dp(6));
+        // Clip child views to the rounded outline so nothing bleeds past corners
+        topView.setClipToOutline(true);
+        // Side padding so content breathes inside the card
+        topView.setPadding(AndroidUtilities.dp(8), 0, AndroidUtilities.dp(8), AndroidUtilities.dp(8));
 
         var logoContainer = new FrameLayout(context);
         var logoView = new BackupImageView(context);
@@ -160,7 +171,7 @@ public class NekoSettingsActivity extends BaseNekoSettingsActivity implements Fa
             return;
         }
 
-        items.add(UItem.asCustomShadow(topView, 200 - 12));
+        items.add(UItem.asCustomShadow(topView, 200 - 12 + 8));
 
         items.add(UItem.asButton(generalRow, R.drawable.msg_media, LocaleController.getString(R.string.General)).slug("general"));
         items.add(UItem.asButton(appearanceRow, R.drawable.msg_theme, LocaleController.getString(R.string.ChangeChannelNameColor2)).slug("appearance"));
