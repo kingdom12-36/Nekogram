@@ -159,13 +159,12 @@ jobs:
       - name: Enable Sentry Upload
         run: |
           echo 'sentry.autoUpload=true'                 >> gradle.properties
-          echo 'sentry.uploadNativeSymbols=true'        >> gradle.properties
-          echo 'sentry.includeSourceContext=true'       >> gradle.properties
+          echo 'sentry.uploadNativeSymbols=false'       >> gradle.properties
+          echo 'sentry.includeSourceContext=false'      >> gradle.properties
           echo 'sentry.uploadProguardMapping=true'      >> gradle.properties
-          echo 'sentry.tracingInstrumentation.enabled=true' >> gradle.properties
-          echo "[Sentry] Enabled flags written to gradle.properties:"
+          echo 'sentry.tracingInstrumentation.enabled=false' >> gradle.properties
+          echo "[Sentry] Optimized flags written to gradle.properties:"
           grep sentry gradle.properties
-
 
       - name: Build Android App
         env:
