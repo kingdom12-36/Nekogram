@@ -1499,4 +1499,87 @@
     <string name="HoldToAudioOnly">Hold to record audio.</string>
     <string name="HoldToAudio">Hold to record audio. Tap to switch to video.</string>
     <string name="HoldToVideo">Hold to record video. Tap to switch to audio.</string>
+
+    <!-- Date/time formatter patterns (used by LocaleController) -->
+    <string name="formatterDay24H">HH:mm</string>
+    <string name="formatterDay12H">h:mm a</string>
+    <string name="formatterDayWithSeconds24H">HH:mm:ss</string>
+    <string name="formatterDayWithSeconds12H">h:mm:ss a</string>
+    <string name="formatterWeek">EEE</string>
+    <string name="formatterWeekLong">EEEE</string>
+    <string name="formatterMonth">dd MMM</string>
+    <string name="formatterYear">dd.MM.yy</string>
+    <string name="formatterYearMax">dd.MM.yyyy</string>
+    <string name="formatterStats24H">MMM dd yyyy, HH:mm</string>
+    <string name="formatterStats12H">MMM dd yyyy, h:mm a</string>
+    <string name="formatterBannedUntil24H">MMM dd yyyy, HH:mm</string>
+    <string name="formatterBannedUntil12H">MMM dd yyyy, h:mm a</string>
+    <string name="formatterBannedUntilThisYear24H">MMM dd, HH:mm</string>
+    <string name="formatterBannedUntilThisYear12H">MMM dd, h:mm a</string>
+    <string name="chatDate">d MMMM</string>
+    <string name="chatDateShort">d MMM</string>
+    <string name="chatFullDate">d MMMM yyyy</string>
+    <string name="formatDateSchedule">MMM d</string>
+    <string name="formatDateScheduleYear">MMM d yyyy</string>
+    <string name="formatterMonthYear">MMM yyyy</string>
+    <string name="formatterMonthOnly">MMMM</string>
+    <string name="formatterGiveawayCard">dd MMM yyyy</string>
+    <string name="formatterBoostExpired">MMM dd, yyyy</string>
+    <string name="formatterGiveawayMonthDay">MMMM dd</string>
+    <string name="formatterGiveawayMonthDayYear">MMMM dd, yyyy</string>
+    <!-- Date/time format strings -->
+    <string name="formatDateAtTime">%1$s at %2$s</string>
+    <string name="TodayAtFormatted">Today at %1$s</string>
+    <string name="TodayAtFormattedWithToday">Today at %1$s</string>
+    <string name="YesterdayAtFormatted">Yesterday at %1$s</string>
+    <!-- Scheduled send/remind/start/publish formatters -->
+    <string name="SendTodayAt">Send today at HH:mm</string>
+    <string name="SendDayAt">Send on MMM d at HH:mm</string>
+    <string name="SendDayYearAt">Send on MMM d yyyy at HH:mm</string>
+    <string name="RemindTodayAt">Remind today at HH:mm</string>
+    <string name="RemindDayAt">Remind on MMM d at HH:mm</string>
+    <string name="RemindDayYearAt">Remind on MMM d yyyy at HH:mm</string>
+    <string name="StartTodayAt">Start today at HH:mm</string>
+    <string name="StartDayAt">Start on MMM d at HH:mm</string>
+    <string name="StartDayYearAt">Start on MMM d yyyy at HH:mm</string>
+    <string name="StartShortTodayAt">Today, HH:mm</string>
+    <string name="StartShortDayAt">MMM d, HH:mm</string>
+    <string name="StartShortDayYearAt">MMM d yyyy, HH:mm</string>
+    <string name="StartsTodayAt">Starts today at HH:mm</string>
+    <string name="StartsDayAt">Starts on MMM d at HH:mm</string>
+    <string name="StartsDayYearAt">Starts on MMM d yyyy at HH:mm</string>
+    <string name="PublishTodayAt">Publish today at HH:mm</string>
+    <string name="PublishDayAt">Publish on MMM d at HH:mm</string>
+    <string name="PublishDayYearAt">Publish on MMM d yyyy at HH:mm</string>
+    <!-- PM info date strings -->
+    <string name="PmReadTodayAt">Read today at %1$s</string>
+    <string name="PmReadYesterdayAt">Read yesterday at %1$s</string>
+    <string name="PmReadDateTimeAt">Read %1$s at %2$s</string>
+    <string name="PmEditedTodayAt">Edited today at %1$s</string>
+    <string name="PmEditedYesterdayAt">Edited yesterday at %1$s</string>
+    <string name="PmEditedDateTimeAt">Edited %1$s at %2$s</string>
+    <string name="PmFwdOriginalTodayAt">Original message, today at %1$s</string>
+    <string name="PmFwdOriginalYesterdayAt">Original message, yesterday at %1$s</string>
+    <string name="PmFwdOriginalDateTimeAt">Original message, %1$s at %2$s</string>
+    <!-- Todo completed date strings -->
+    <string name="TodoCompletedTodayAt">Completed today at %1$s</string>
+    <string name="TodoCompletedYesterdayAt">Completed yesterday at %1$s</string>
+    <string name="TodoCompletedDateTimeAt">Completed %1$s at %2$s</string>
+    <!-- Poll timing strings -->
+    <string name="PollEndsIn">Poll ends in %1$s</string>
+    <string name="PollResultsIn">Results in %1$s</string>
+    <!-- Location update strings -->
+    <string name="LocationUpdatedJustNow">Just now</string>
+    <string name="LocationUpdatedFormatted">Updated %1$s</string>
+    <!-- Relative time strings -->
+    <string name="RightNow">Just now</string>
+    <string name="ShortNow">now</string>
+    <string name="ShortToday">Today</string>
+    <string name="ShortYesterday">Yesterday</string>
+    <string name="LessMinuteAgo">just now</string>
+    <string name="MinuteAgo">a minute ago</string>
+    <string name="HourAgo">an hour ago</string>
+    <string name="DayAgo">a day ago</string>
+    <string name="MonthAgo">a month ago</string>
+    <string name="YearAgo">a year ago</string>
 </resources>
