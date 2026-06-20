@@ -11122,4 +11122,8 @@
     <string name="WalletScanCode">Scan QR Code</string>
     <string name="WalletScanCodeNotFound">No QR code found</string>
     <string name="WebPoweredBy">Powered by %s</string>
+
+    <string name="copy">Copy</string>
+    <string name="selectAll">Select All</string>
+    <string name="paste">Paste</string>
 </resources>
