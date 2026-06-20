@@ -874,6 +874,12 @@
         <!-- https://issuetracker.google.com/issues/476788722 -->
         <uses-library android:name="org.apache.http.legacy" android:required="false" />
 
+
+        <activity
+            android:name="tw.nekomimi.nekogram.ai.LinkitAiActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize"
+            android:exported="false" />
+
     </application>
 
 </manifest>
