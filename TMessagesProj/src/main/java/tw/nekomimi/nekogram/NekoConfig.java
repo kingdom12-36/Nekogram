@@ -131,6 +131,8 @@ public class NekoConfig {
     public static boolean newMarkdownParser = true;
     public static boolean markdownParseLinks = true;
     public static boolean hideStories = false;
+    public static boolean saveEditsHistory = false;
+    public static boolean showDeletedMessages = false;
     public static boolean quickForward = false;
     public static boolean reducedColors = false;
     public static boolean ignoreContentRestriction = false;
@@ -229,6 +231,8 @@ public class NekoConfig {
             showQrCode = preferences.getBoolean("showQrCode", false);
             showOpenIn = preferences.getBoolean("showOpenIn", false);
             hideStories = preferences.getBoolean("hideStories", false);
+            saveEditsHistory = preferences.getBoolean("saveEditsHistory", false);
+            showDeletedMessages = preferences.getBoolean("showDeletedMessages", false);
             quickForward = preferences.getBoolean("quickForward", false);
             reducedColors = preferences.getBoolean("reducedColors", false);
             ignoreContentRestriction = preferences.getBoolean("ignoreContentRestriction", false);
