@@ -1276,6 +1276,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_SUGGESTION_EDIT_PRICE = 111;
     public final static int OPTION_SUGGESTION_EDIT_TIME = 112;
     public final static int OPTION_SUGGESTION_EDIT_MESSAGE = 113;
+    public final static int OPTION_EDITS_HISTORY = 445;
     public final static int OPTION_SUGGESTION_ADD_OFFER = 114;
 
     public final static int OPTION_VIEW_STATISTICS = 115;
@@ -34023,6 +34024,14 @@ public class ChatActivity extends BaseFragment implements
                 selectedObjectToEditCaption = null;
                 break;
             }
+            case OPTION_EDITS_HISTORY: {
+                if (selectedObject != null) {
+                    new tw.nekomimi.nekogram.EditHistoryBottomSheet(ChatActivity.this, selectedObject).show();
+                    selectedObject = null;
+                    selectedObjectGroup = null;
+                }
+                break;
+            }
             case OPTION_EDIT_PRICE: {
                 final MessageObject msg = selectedObject;
                 TLRPC.TL_messageMediaPaidMedia paidMedia = (TLRPC.TL_messageMediaPaidMedia) selectedObject.messageOwner.media;
@@ -46261,6 +46270,13 @@ public class ChatActivity extends BaseFragment implements
                 if (message.canEditMessage(currentChat) && message.type != MessageObject.TYPE_POLL) {
                     items.add(LocaleController.getString(R.string.Edit));
                     options.add(OPTION_EDIT);
+                    icons.add(R.drawable.msg_edit);
+                }
+                // Nekogram: Show Edit History option
+                if (tw.nekomimi.nekogram.NekoConfig.saveEditsHistory && selectedObject != null && selectedObject.messageOwner != null && selectedObject.messageOwner.edit_date != 0 &&
+                        tw.nekomimi.nekogram.helpers.MessageEditsDatabase.getInstance(getParentActivity()).hasEdits(selectedObject.getDialogId(), selectedObject.getId())) {
+                    items.add(LocaleController.getString(org.telegram.messenger.R.string.NekoEditHistory));
+                    options.add(OPTION_EDITS_HISTORY);
                     icons.add(R.drawable.msg_edit);
                 }
                 if (ChatObject.isMonoForum(currentChat) && selectedObject.getGroupId() == 0 && selectedObjectGroup == null && message != null && message.messageOwner != null && message.messageOwner.suggested_post == null && message.messageOwner.action == null) {
