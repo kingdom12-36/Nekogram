@@ -135,18 +135,8 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Android App
-        run: |
-          ./gradlew :TMessagesProj_App:assembleRelease \
-            --no-configuration-cache \
-            -Pandroid.antlr.arguments="-w" \
-            -Dorg.gradle.project.android.ndk.cflags="-w" \
-            -Dorg.gradle.project.android.ndk.cppflags="-w" \
-            -Pandroid.injected.testOnly=false \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
-            -x sentryBundleSourcesRelease \
-            -x sentryUploadNativeSymbolsRelease \
-            -x sentryCollectSourcesRelease \
-            --stacktrace
+        run: ./gradlew :TMessagesProj_App:assembleRelease -x sentryBundleSourcesRelease -x sentryUploadNativeSymbolsRelease -x sentryCollectSourcesRelease --no-configuration-cache -Pandroid.antlr.arguments="-w" -Dorg.gradle.project.android.ndk.cflags="-w" -Dorg.gradle.project.android.ndk.cppflags="-w" -Pandroid.injected.testOnly=false -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" --stacktrace
+
 
       - name: Locate & Stage APK
         run: |
