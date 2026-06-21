@@ -132,6 +132,7 @@ jobs:
           APP_NAME: "OctoGram Linkit"
           APP_DOWNLOAD_URL: "https://telegram.org/dl"
           APP_SOURCES_URL: "https://github.com/kingdom12-36/OctoGram"
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           chmod +x scripts/*.sh 2>/dev/null || true
           mkdir -p /home/runner/bin
@@ -148,6 +149,7 @@ jobs:
             echo "mapsApiKey=$MAPS_KEY"
             echo "apiId=$TELEGRAM_API_ID"
             echo "apiHash=$TELEGRAM_API_HASH"
+            echo "sentryDsn=$SENTRY_DSN"
           } > local.properties
           echo "=== local.properties (credentials redacted) ==="
           grep -v "apiId\|apiHash\|storePassword\|keyPassword" local.properties
