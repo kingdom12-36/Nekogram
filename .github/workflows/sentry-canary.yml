@@ -1,9 +1,5 @@
 name: Sentry Canary (Crash Test)
 
-# PURPOSE: Build a tiny 1-file Android app in ~3 min, crash it on the emulator,
-#          and confirm Sentry receives the event. Proves the Sentry pipeline works
-#          independently of the full Nekogram build.
-
 on:
   workflow_dispatch:
 
@@ -31,7 +27,6 @@ jobs:
           mkdir -p canary/app/src/main/java/io/sentry/canary
           mkdir -p canary/app/src/main/res/values
 
-          # ── settings.gradle ──────────────────────────────────────────────
           cat > canary/settings.gradle << 'EOF'
           pluginManagement {
               repositories { google(); mavenCentral(); gradlePluginPortal() }
@@ -44,16 +39,20 @@ jobs:
           include ':app'
           EOF
 
-          # ── root build.gradle ─────────────────────────────────────────────
           cat > canary/build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.2.2' apply false
               id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
-              id 'io.sentry.android.gradle' version '4.4.1' apply false
           }
           EOF
 
-          # ── app/build.gradle ──────────────────────────────────────────────
+          cat > canary/gradle.properties << 'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          org.gradle.daemon=false
+          EOF
+
           cat > canary/app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
@@ -70,9 +69,7 @@ jobs:
                   versionName '1.0'
               }
               buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
+                  release { minifyEnabled false }
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -85,7 +82,6 @@ jobs:
           }
           EOF
 
-          # ── AndroidManifest.xml ────────────────────────────────────────────
           cat > canary/app/src/main/AndroidManifest.xml << MANIFEST
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -94,7 +90,6 @@ jobs:
                   android:theme="@style/Theme.AppCompat">
                   <meta-data android:name="io.sentry.dsn" android:value="${SENTRY_DSN}" />
                   <meta-data android:name="io.sentry.environment" android:value="canary-ci" />
-                  <meta-data android:name="io.sentry.send-default-pii" android:value="false" />
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
@@ -107,7 +102,6 @@ jobs:
           </manifest>
           MANIFEST
 
-          # ── res/values/styles.xml ─────────────────────────────────────────
           cat > canary/app/src/main/res/values/styles.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -115,7 +109,6 @@ jobs:
           </resources>
           EOF
 
-          # ── MainActivity.kt ────────────────────────────────────────────────
           cat > canary/app/src/main/java/io/sentry/canary/MainActivity.kt << 'EOF'
           package io.sentry.canary
           import android.app.Activity
@@ -127,32 +120,24 @@ jobs:
           class MainActivity : Activity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  // Give Sentry 2 s to init, then crash deliberately
                   Handler(Looper.getMainLooper()).postDelayed({
-                      Sentry.captureMessage("Canary CI test — pipeline working ✅")
-                      // Now throw a hard crash so logcat also shows it
-                      throw RuntimeException("SentryCanary intentional crash — CI pipeline test")
+                      Sentry.captureMessage("Canary CI — pipeline check")
+                      throw RuntimeException("SentryCanary intentional crash — CI test")
                   }, 2000)
               }
           }
           EOF
 
-          # ── gradle wrapper ─────────────────────────────────────────────────
           cd canary
           gradle wrapper --gradle-version 8.4 --distribution-type bin -q
           chmod +x gradlew
 
-          echo "✅ Project ready — building..."
-          ./gradlew :app:assembleRelease \
-            --no-daemon \
-            --no-configuration-cache \
-            -q
-
+          echo "=== Building ==="
+          ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache -q
           APK=$(find . -path "*/outputs/apk/release/*.apk" | head -1)
           cp "$APK" ../canary.apk
           cd ..
           ls -lh canary.apk
-          echo "✅ APK built: $(du -sh canary.apk | cut -f1)"
 
       - name: Enable KVM
         run: |
@@ -178,19 +163,17 @@ jobs:
           echo "━━━ CANARY CRASH TEST ━━━"
           $ADB install -r canary.apk && echo "✅ Installed"
 
-          # Grab Sentry issue count BEFORE launch so we can detect new ones
           BEFORE=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
             "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50" \
             | grep -c '"id"' | tr -d '[:space:]')
           BEFORE="${BEFORE:-0}"
-          echo "Sentry issues before launch: $BEFORE"
+          echo "Sentry issues BEFORE: $BEFORE"
 
           $ADB logcat -c
           $ADB logcat > /tmp/canary_logcat.txt 2>&1 &
           LOGCAT_PID=$!
 
-          echo "Launching canary app..."
           $ADB shell am start -n "$PKG/.MainActivity" \
             -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
           echo "Waiting 30 s for crash + Sentry flush..."
@@ -199,28 +182,24 @@ jobs:
           kill $LOGCAT_PID 2>/dev/null || true
 
           echo ""
-          echo "━━━ Logcat crash evidence ━━━"
-          grep -E "SentryCanary|FATAL|RuntimeException|io.sentry.canary" \
-            /tmp/canary_logcat.txt | head -30 || echo "(nothing)"
+          echo "━━━ Crash evidence in logcat ━━━"
+          grep -E "SentryCanary|RuntimeException|FATAL|io.sentry.canary" \
+            /tmp/canary_logcat.txt | head -20 || echo "(none)"
 
           echo ""
-          echo "━━━ Sentry check ━━━"
           AFTER_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
             "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50")
           AFTER=$(echo "$AFTER_RESP" | grep -c '"id"' | tr -d '[:space:]')
           AFTER="${AFTER:-0}"
-          echo "Sentry issues after launch: $AFTER"
-          echo "$AFTER_RESP" | grep -oP '(?<="title":")[^"]+' | head -10 || true
+          echo "Sentry issues AFTER: $AFTER"
+          echo "$AFTER_RESP" | grep -oP '(?<="title":")[^"]+' | head -5 || true
 
-          echo ""
           if [ "${AFTER}" -gt "${BEFORE}" ]; then
-            echo "🟢 CANARY PASSED — Sentry received the crash! (${BEFORE} → ${AFTER} issues)"
-            echo "👉 https://sham-19.sentry.io/issues/"
+            echo "🟢 CANARY PASSED — Sentry got the crash! ($BEFORE → $AFTER)"
             exit 0
           else
-            echo "🔴 CANARY FAILED — Sentry issue count unchanged (${BEFORE} → ${AFTER})"
-            echo "Check: DSN correct? Network reachable? Logcat below:"
+            echo "🔴 CANARY FAILED — Sentry count unchanged ($BEFORE → $AFTER)"
             tail -50 /tmp/canary_logcat.txt
             exit 1
           fi
