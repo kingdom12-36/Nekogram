@@ -46,16 +46,25 @@ public class AnalyticsHelper {
         firebaseAnalytics = FirebaseAnalytics.getInstance(application);
         firebaseAnalytics.setAnalyticsCollectionEnabled(true);
         firebaseAnalytics.setUserId(userId);
-        SentryAndroid.init(application, options -> {
-            options.setDsn(Extra.SENTRY_DSN);
-            options.setEnvironment(BuildConfig.BUILD_TYPE);
-            options.setPrintUncaughtStackTrace(true);
-            options.setSendDefaultPii(true);
-            options.setEnableUserInteractionTracing(true);
-            options.setAttachViewHierarchy(true);
-            options.setEnableSystemEventBreadcrumbsExtras(true);
-            options.setTracesSampleRate(0.01);
-        });
+        // Guard: only init Sentry when a valid DSN is configured.
+        // Without this check the app crashes on startup when SENTRY_DSN is
+        // empty or the string literal "null" (produced when sentryDsn is
+        // absent from local.properties at build time).
+        String dsn = Extra.SENTRY_DSN;
+        boolean hasDsn = dsn != null && !dsn.isEmpty()
+                && !"null".equals(dsn) && dsn.startsWith("https://");
+        if (hasDsn && sendBugReport) {
+            SentryAndroid.init(application, options -> {
+                options.setDsn(dsn);
+                options.setEnvironment(BuildConfig.BUILD_TYPE);
+                options.setPrintUncaughtStackTrace(true);
+                options.setSendDefaultPii(true);
+                options.setEnableUserInteractionTracing(true);
+                options.setAttachViewHierarchy(true);
+                options.setEnableSystemEventBreadcrumbsExtras(true);
+                options.setTracesSampleRate(0.01);
+            });
+        }
         var user = new User();
         user.setId(userId);
         Sentry.setUser(user);
