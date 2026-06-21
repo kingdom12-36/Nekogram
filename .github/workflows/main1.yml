@@ -290,42 +290,76 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -la /dev/kvm
 
-      - name: Write smoke-test script
+      - name: Write smoke-test script (Sentry-based)
         env:
           APP_PKG: ${{ needs.build.outputs.app-pkg }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          cat > /tmp/smoke.sh << SCRIPT
+          cat > /tmp/smoke.sh << 'ENDSCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
           PKG="${APP_PKG}"
-          ADB="\$ANDROID_HOME/platform-tools/adb"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  SMOKE TEST — \$PKG"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          \$ADB install -r OctoGram-arm64.apk
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          SENTRY_TOKEN="${SENTRY_AUTH_TOKEN}"
+          SENTRY_ORG="sham-19"
+          SENTRY_PROJECT="android"
+
+          echo "━━━ SENTRY SMOKE TEST — $PKG ━━━"
+
+          $ADB install -r OctoGram-arm64.apk
           echo "✅ APK installed"
-          \$ADB logcat -c
-          \$ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
-          LOGCAT_PID=\$!
-          \$ADB shell am start -n "\$PKG/org.telegram.ui.LaunchActivity" \
+
+          # Record launch time so we only look at new Sentry events
+          LAUNCH_TS=$(date -u +%s)
+          echo "Launch epoch: $LAUNCH_TS"
+
+          # Logcat fallback for native crashes
+          $ADB logcat -c
+          $ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
+          LOGCAT_PID=$!
+
+          $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
             -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
-          echo "Launched — watching 20 s..."
-          sleep 20
-          ALIVE=\$(\$ADB shell pidof "\$PKG" 2>/dev/null | tr -d '[:space:]' || true)
-          kill \$LOGCAT_PID 2>/dev/null || true
+          echo "Launched — waiting 35 s for Sentry SDK to flush..."
+          sleep 35
+
+          ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d "[:space:]" || true)
+          kill $LOGCAT_PID 2>/dev/null || true
+
           echo ""
-          echo "━━━ LOGCAT (crashes / JNI) ━━━"
-          grep -E "CRASH|FATAL|died|libneko|JNI|\$PKG|NativeLoader" /tmp/smoke_logcat.txt | head -60 || true
-          echo ""
-          if [ -n "\$ALIVE" ]; then
-            echo "🟢 SMOKE TEST PASSED — process alive (pid \$ALIVE) after 20 s"
-            exit 0
+          echo "━━━ Process status ━━━"
+          if [ -n "$ALIVE" ]; then
+            echo "💚 Process alive (pid $ALIVE)"
           else
-            echo "🔴 SMOKE TEST FAILED — process gone after 20 s"
-            tail -100 /tmp/smoke_logcat.txt
-            exit 1
+            echo "📛 Process dead — checking Sentry + logcat"
           fi
-          SCRIPT
+
+          echo ""
+          echo "━━━ Sentry issues check ━━━"
+          SENTRY_RESP=$(curl -s \
+            -H "Authorization: Bearer $SENTRY_TOKEN" \
+            "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
+          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null || echo "0")
+          echo "Open Sentry issues: $SENTRY_COUNT"
+          echo "$SENTRY_RESP" | grep -oP '(?<="title":")[^"]+' | head -5 || true
+
+          echo ""
+          echo "━━━ Logcat (native crashes) ━━━"
+          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|$PKG" \
+            /tmp/smoke_logcat.txt | head -40 || echo "(no crash lines)"
+
+          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|libneko.*died|fatal signal" /tmp/smoke_logcat.txt 2>/dev/null || echo "0")
+
+          echo ""
+          if [ "$SENTRY_COUNT" -gt "0" ] || [ "$LOGCAT_CRASH" -gt "0" ] || [ -z "$ALIVE" ]; then
+            echo "🔴 SMOKE FAILED — Sentry:$SENTRY_COUNT logcat:$LOGCAT_CRASH alive:${ALIVE:-none}"
+            tail -80 /tmp/smoke_logcat.txt
+            exit 1
+          else
+            echo "🟢 SMOKE PASSED — 0 Sentry issues, process alive, logcat clean"
+            exit 0
+          fi
+          ENDSCRIPT
           chmod +x /tmp/smoke.sh
 
       - name: Run smoke test on emulator
