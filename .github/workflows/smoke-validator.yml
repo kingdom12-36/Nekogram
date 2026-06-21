@@ -1,16 +1,13 @@
 name: Smoke Test Validator (Crash Regression)
 
-# ─────────────────────────────────────────────────────────────────────
-# PURPOSE: Verify the smoke-test is reliable by running it against
-#          three known APKs and checking the results match expectations.
+# PURPOSE: Verify the smoke-test catches real crashes by replaying known-bad
+#          and known-good APKs through the emulator.
 #
 #   Run #65 → EXPECTED: CRASH  (Bug: API_ID=0, native abort at launch)
 #   Run #67 → EXPECTED: CRASH  (Bug: -repackageclasses breaks JNI FindClass)
-#   Run #68 → EXPECTED: PASS   (Both bugs fixed)
+#   Run #68 → EXPECTED: PASS   (Both bugs fixed — should stay alive)
 #
 # If #65 and #67 CRASH and #68 PASSES → smoke test is reliable.
-# If any result is wrong → the smoke test has a blind spot and needs fixing.
-# ─────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
@@ -22,7 +19,6 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     strategy:
-      # Run all three even if one fails so we see all results
       fail-fast: false
       matrix:
         include:
@@ -30,7 +26,7 @@ jobs:
             artifact_id: "7773650299"
             pkg: "org.linkit.octogram65"
             expected: "crash"
-            reason: "API_ID=0 → libneko.so aborts at JNI_OnLoad"
+            reason: "API_ID=0 causes libneko.so to abort in JNI_OnLoad"
 
           - run_num: "67"
             artifact_id: "7775721430"
@@ -42,7 +38,7 @@ jobs:
             artifact_id: "7776662716"
             pkg: "org.linkit.octogram68"
             expected: "pass"
-            reason: "Both bugs fixed — should launch cleanly"
+            reason: "Both bugs fixed — app should launch cleanly"
 
     name: "Run #${{ matrix.run_num }} (expected: ${{ matrix.expected }})"
 
@@ -50,8 +46,8 @@ jobs:
       - name: Print test plan
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  TEST PLAN"
-          echo "  Run #${{ matrix.run_num }} | artifact ${{ matrix.artifact_id }}"
+          echo "  Run #${{ matrix.run_num }}"
+          echo "  Artifact: ${{ matrix.artifact_id }}"
           echo "  Package : ${{ matrix.pkg }}"
           echo "  Expected: ${{ matrix.expected }}"
           echo "  Reason  : ${{ matrix.reason }}"
@@ -59,18 +55,15 @@ jobs:
 
       - name: Download APK from run #${{ matrix.run_num }}
         run: |
-          echo "Downloading artifact ${{ matrix.artifact_id }} ..."
           curl -sL \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ matrix.artifact_id }}/zip" \
             -o artifact.zip
           unzip -o artifact.zip
-          ls -lh *.apk || { echo "❌ No APK found in artifact"; exit 1; }
-          # Rename to a stable name regardless of what's in the zip
-          APK=$(ls *.apk | head -1)
-          mv "$APK" test.apk
-          echo "APK ready: test.apk ($(du -sh test.apk | cut -f1))"
+          ls -lh *.apk || { echo "❌ No APK in artifact"; exit 1; }
+          mv "$(ls *.apk | head -1)" test.apk
+          echo "Ready: test.apk ($(du -sh test.apk | cut -f1))"
 
       - name: Enable KVM
         run: |
@@ -79,6 +72,63 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           ls -la /dev/kvm
+
+      - name: Write test script
+        env:
+          TEST_PKG: ${{ matrix.pkg }}
+          TEST_EXPECTED: ${{ matrix.expected }}
+        run: |
+          cat > /tmp/validate.sh << SCRIPT
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PKG="${TEST_PKG}"
+          EXPECTED="${TEST_EXPECTED}"
+          ADB="\$ANDROID_HOME/platform-tools/adb"
+
+          echo "━━━ INSTALLING ━━━"
+          \$ADB install -r test.apk
+          echo "✅ Installed \$PKG"
+
+          \$ADB logcat -c
+          \$ADB logcat -b crash,main *:W > /tmp/logcat.txt 2>&1 &
+          LOGCAT_PID=\$!
+
+          echo "━━━ LAUNCHING — watching 25 s ━━━"
+          \$ADB shell am start -n "\$PKG/org.telegram.ui.LaunchActivity" \
+            -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
+          sleep 25
+
+          ALIVE=\$(\$ADB shell pidof "\$PKG" 2>/dev/null | tr -d '[:space:]' || true)
+          kill \$LOGCAT_PID 2>/dev/null || true
+
+          echo ""
+          echo "━━━ LOGCAT (crashes / JNI) ━━━"
+          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|\$PKG" \
+            /tmp/logcat.txt | head -60 || echo "(no matching lines)"
+
+          echo ""
+          ACTUAL="pass"
+          [ -z "\$ALIVE" ] && ACTUAL="crash"
+
+          if [ "\$ACTUAL" = "crash" ]; then
+            echo "📛 App process DIED within 25 s"
+          else
+            echo "💚 App process ALIVE (pid \$ALIVE) after 25 s"
+          fi
+
+          echo ""
+          if [ "\$ACTUAL" = "\$EXPECTED" ]; then
+            echo "✅ VALIDATOR CORRECT — expected=\$EXPECTED actual=\$ACTUAL"
+            exit 0
+          else
+            echo "❌ VALIDATOR WRONG — expected=\$EXPECTED got=\$ACTUAL"
+            echo "--- This means the smoke test has a BLIND SPOT ---"
+            echo "--- Full logcat ---"
+            tail -120 /tmp/logcat.txt
+            exit 1
+          fi
+          SCRIPT
+          chmod +x /tmp/validate.sh
 
       - name: Boot emulator + run test
         uses: reactivecircus/android-emulator-runner@v2
@@ -91,98 +141,29 @@ jobs:
           ram-size: 2048M
           heap-size: 512M
           disk-size: 4096M
-          emulator-options: >-
-            -no-window
-            -no-audio
-            -no-snapshot
-            -gpu swiftshader_indirect
+          emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
-          script: |
-            PKG="${{ matrix.pkg }}"
-            EXPECTED="${{ matrix.expected }}"
-            ADB="$ANDROID_HOME/platform-tools/adb"
+          script: bash /tmp/validate.sh
 
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  INSTALLING APK"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            $ADB install -r test.apk
-            echo "✅ Installed $PKG"
-
-            # Clear + capture logcat
-            $ADB logcat -c
-            $ADB logcat -b crash,main *:W > /tmp/logcat.txt 2>&1 &
-            LOGCAT_PID=$!
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  LAUNCHING APP — watching 25 s"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
-              -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
-            sleep 25
-
-            ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '[:space:]' || true)
-            kill $LOGCAT_PID 2>/dev/null || true
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  LOGCAT — crashes / JNI / warnings"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|$PKG" \
-              /tmp/logcat.txt | head -60 || echo "(no matching lines)"
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  RESULT"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            ACTUAL="pass"
-            [ -z "$ALIVE" ] && ACTUAL="crash"
-
-            if [ "$ACTUAL" = "crash" ]; then
-              echo "📛 App process DIED within 25 s"
-            else
-              echo "💚 App process ALIVE (pid $ALIVE) after 25 s"
-            fi
-
-            echo ""
-            if [ "$ACTUAL" = "$EXPECTED" ]; then
-              echo "✅ VALIDATOR: CORRECT — expected=$EXPECTED actual=$ACTUAL"
-              exit 0
-            else
-              echo "❌ VALIDATOR: WRONG — expected=$EXPECTED but got=$ACTUAL"
-              echo ""
-              echo "--- This means the smoke test has a BLIND SPOT ---"
-              echo "--- Full logcat (last 120 lines) ---"
-              tail -120 /tmp/logcat.txt
-              exit 1
-            fi
-
-  # ─────────────────────────────────────────────────────────────────────
-  # Summary job — shows a clean table of all three results
-  # ─────────────────────────────────────────────────────────────────────
   summary:
     runs-on: ubuntu-latest
     needs: validate
     if: always()
-
     steps:
-      - name: Print validation summary
+      - name: Print results table
         run: |
-          R65="${{ needs.validate.result }}"
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║           SMOKE TEST VALIDATOR — FINAL RESULTS          ║"
-          echo "╠══════════╦══════════════╦══════════════╦════════════════╣"
-          echo "║ Run      ║ Bug          ║ Expected     ║ Validator      ║"
-          echo "╠══════════╬══════════════╬══════════════╬════════════════╣"
-          echo "║ #65      ║ API_ID=0     ║ CRASH        ║ see job above  ║"
-          echo "║ #67      ║ -repackage   ║ CRASH        ║ see job above  ║"
-          echo "║ #68      ║ Both fixed   ║ PASS         ║ see job above  ║"
-          echo "╚══════════╩══════════════╩══════════════╩════════════════╝"
+          echo "║        SMOKE TEST VALIDATOR — FINAL RESULTS             ║"
+          echo "╠══════════╦═══════════════════╦═════════════════════════╣"
+          echo "║ Build    ║ Bug               ║ Expected result         ║"
+          echo "╠══════════╬═══════════════════╬═════════════════════════╣"
+          echo "║ #65      ║ API_ID=0          ║ CRASH                   ║"
+          echo "║ #67      ║ -repackageclasses ║ CRASH                   ║"
+          echo "║ #68      ║ Both fixed        ║ PASS                    ║"
+          echo "╚══════════╩═══════════════════╩═════════════════════════╝"
           echo ""
-          echo "Overall matrix result: $R65"
-          echo ""
-          echo "→ Open each matrix job above to see individual CORRECT/WRONG verdicts."
-          echo "→ If all three say CORRECT: smoke-test catches real crashes reliably."
-          echo "→ If any say WRONG: smoke-test has a blind spot and needs investigation."
+          echo "Matrix overall: ${{ needs.validate.result }}"
+          echo "→ Check each matrix job above for CORRECT / WRONG verdict."
+          echo "→ All CORRECT = smoke-test reliably catches real crashes."
+          echo "→ Any WRONG   = blind spot, needs investigation."
