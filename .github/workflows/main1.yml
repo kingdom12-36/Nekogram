@@ -139,6 +139,7 @@ jobs:
             echo "keyAlias=Linkit"
             echo "keyPassword=Linkit"
             echo "mapsApiKey=$MAPS_KEY"
+            echo "sentryDsn="
           } > local.properties
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
