@@ -1,8 +1,7 @@
 name: Smoke Validator (Latest Build)
 
 # PURPOSE: Download the latest successful OctoGram build, install it on an
-#          emulator, and check Sentry + logcat for crashes.
-#          Run manually or automatically after each main build.
+#          emulator, and check Sentry + logcat for crashes — NO rebuild needed.
 
 on:
   workflow_dispatch:
@@ -48,7 +47,6 @@ jobs:
         run: |
           RUN_ID="${{ steps.find_artifact.outputs.run_id }}"
 
-          # Get artifact list for this run
           ARTIFACTS=$(curl -s \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -58,8 +56,7 @@ jobs:
           ARTIFACT_NAME=$(echo "$ARTIFACTS" | grep -oP '"name":"\K[^"]+' | head -1)
 
           if [ -z "$ARTIFACT_ID" ]; then
-            echo "❌ No artifact found for run $RUN_ID (may have expired)"
-            echo "Artifacts response: $(echo $ARTIFACTS | head -c 300)"
+            echo "❌ No artifact found for run $RUN_ID (may have expired after 7 days)"
             exit 1
           fi
 
@@ -81,36 +78,37 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
 
       - name: Write smoke script
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          cat > /tmp/smoke.sh << 'ENDSCRIPT'
+          # Bake the token in at write time (unquoted heredoc = expansion happens now)
+          TOKEN_VAL="${SENTRY_AUTH_TOKEN}"
+          cat > /tmp/smoke.sh << HEADER
           #!/usr/bin/env bash
           set -euo pipefail
+          SENTRY_TOKEN="$TOKEN_VAL"
+          HEADER
+          # Rest of script uses single-quoted heredoc so bash vars stay literal
+          cat >> /tmp/smoke.sh << 'BODY'
           ADB="$ANDROID_HOME/platform-tools/adb"
-          SENTRY_TOKEN="${SENTRY_AUTH_TOKEN}"
+          AAPT="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)/aapt"
           SENTRY_ORG="sham-19"
           SENTRY_PROJECT="android"
 
-          # Resolve package name from the APK itself
-          AAPT="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)/aapt"
+          # Detect package name from APK itself — no hardcoding needed
           PKG=$($AAPT dump badging test.apk 2>/dev/null | grep "^package:" | grep -oP "name='\K[^']+")
-          echo "Package: $PKG"
+          echo "━━━ SMOKE VALIDATOR — $PKG ━━━"
 
-          echo "━━━ INSTALLING ━━━"
-          $ADB install -r test.apk && echo "✅ Installed"
+          $ADB install -r test.apk && echo "✅ APK installed"
 
-          # Mark start time for Sentry query
-          LAUNCH_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-          # Logcat fallback
           $ADB logcat -c
-          $ADB logcat -b crash,main *:W > /tmp/logcat.txt 2>&1 &
+          $ADB logcat -b crash,main,system *:W > /tmp/logcat.txt 2>&1 &
           LOGCAT_PID=$!
 
-          echo "━━━ LAUNCHING — waiting 40 s ━━━"
+          echo "Launching app — waiting 40 s..."
           $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
             -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
           sleep 40
@@ -119,45 +117,47 @@ jobs:
           kill $LOGCAT_PID 2>/dev/null || true
 
           echo ""
-          echo "━━━ Process ━━━"
-          [ -n "$ALIVE" ] && echo "💚 Alive (pid $ALIVE)" || echo "📛 Process dead"
+          echo "━━━ Process status ━━━"
+          [ -n "$ALIVE" ] && echo "💚 Process alive (pid $ALIVE)" || echo "📛 Process DEAD"
 
           echo ""
           echo "━━━ Sentry issues ━━━"
           SENTRY_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
-            "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
-          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null || echo "0")
-          echo "Open issues in Sentry: $SENTRY_COUNT"
+            "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10")
+          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' | tr -d '[:space:]')
+          SENTRY_COUNT="${SENTRY_COUNT:-0}"
+          echo "Open Sentry issues: $SENTRY_COUNT"
           echo "$SENTRY_RESP" | grep -oP '(?<="title":")[^"]+' | nl | head -10 || true
 
           echo ""
           echo "━━━ Logcat (crashes) ━━━"
-          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|$PKG" \
-            /tmp/logcat.txt | head -50 || echo "(no crash lines)"
+          grep -E "CRASH|FATAL|SIGSEGV|AndroidRuntime|Process.*died|libneko|JNI|NativeLoader|$PKG" \
+            /tmp/logcat.txt | head -60 || echo "(no crash lines found)"
 
-          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|libneko.*died|fatal signal" \
-            /tmp/logcat.txt 2>/dev/null || echo "0")
+          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|Process.*died|fatal signal|AndroidRuntime" \
+            /tmp/logcat.txt | tr -d '[:space:]')
+          LOGCAT_CRASH="${LOGCAT_CRASH:-0}"
 
           echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          if [ "$SENTRY_COUNT" -gt "0" ] || [ "$LOGCAT_CRASH" -gt "0" ] || [ -z "$ALIVE" ]; then
-            echo "🔴 VALIDATOR FAILED"
-            echo "   Sentry issues : $SENTRY_COUNT"
-            echo "   Logcat crashes: $LOGCAT_CRASH"
-            echo "   Process alive : ${ALIVE:-NONE}"
+          if [ "${SENTRY_COUNT}" -gt 0 ] || [ "${LOGCAT_CRASH}" -gt 0 ] || [ -z "$ALIVE" ]; then
+            echo "🔴 SMOKE FAILED"
+            echo "   Sentry issues : ${SENTRY_COUNT}"
+            echo "   Logcat crashes: ${LOGCAT_CRASH}"
+            echo "   Process alive : ${ALIVE:-DEAD}"
             echo ""
             echo "--- Full logcat (last 100 lines) ---"
             tail -100 /tmp/logcat.txt
             exit 1
           else
-            echo "🟢 VALIDATOR PASSED"
+            echo "🟢 SMOKE PASSED"
             echo "   Sentry issues : 0"
             echo "   Logcat crashes: 0"
             echo "   Process alive : $ALIVE"
             exit 0
           fi
-          ENDSCRIPT
+          BODY
           chmod +x /tmp/smoke.sh
 
       - name: Boot emulator + run validator
@@ -175,16 +175,8 @@ jobs:
           disable-animations: true
           script: bash /tmp/smoke.sh
 
-      - name: Post result summary
+      - name: Summary
         if: always()
         run: |
-          echo ""
-          echo "╔══════════════════════════════════════╗"
-          echo "║     SMOKE VALIDATOR — SUMMARY        ║"
-          echo "╠══════════════════════════════════════╣"
-          echo "║ Build tested : Run #${{ steps.find_artifact.outputs.run_num }}"
-          echo "║ Sentry org   : sham-19.sentry.io     ║"
-          echo "║ Sentry proj  : android               ║"
-          echo "╚══════════════════════════════════════╝"
-          echo ""
-          echo "→ Full crash details at: https://sham-19.sentry.io/issues/"
+          echo "Build tested: Run #${{ steps.find_artifact.outputs.run_num }}"
+          echo "Sentry dashboard: https://sham-19.sentry.io/issues/"
