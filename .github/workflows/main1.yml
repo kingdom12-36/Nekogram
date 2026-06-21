@@ -269,13 +269,6 @@ jobs:
           path: OctoGram-arm64.apk
           retention-days: 7
 
-  # ─────────────────────────────────────────────────────────────────────
-  # SMOKE TEST
-  # Uses an x86_64 emulator with KVM — boots in ~2 min, translates arm64
-  # APKs automatically (Android's libhoudini, available on google_apis
-  # images API 28+). Much faster than arm64-v8a which needs QEMU full
-  # emulation and times out on GitHub runners.
-  # ─────────────────────────────────────────────────────────────────────
   smoke-test:
     runs-on: ubuntu-latest
     needs: build
@@ -295,6 +288,44 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -la /dev/kvm
 
+      - name: Write smoke-test script
+        env:
+          APP_PKG: ${{ needs.build.outputs.app-pkg }}
+        run: |
+          cat > /tmp/smoke.sh << SCRIPT
+          #!/usr/bin/env bash
+          set -euo pipefail
+          PKG="${APP_PKG}"
+          ADB="\$ANDROID_HOME/platform-tools/adb"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  SMOKE TEST — \$PKG"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          \$ADB install -r OctoGram-arm64.apk
+          echo "✅ APK installed"
+          \$ADB logcat -c
+          \$ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
+          LOGCAT_PID=\$!
+          \$ADB shell am start -n "\$PKG/org.telegram.ui.LaunchActivity" \
+            -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
+          echo "Launched — watching 20 s..."
+          sleep 20
+          ALIVE=\$(\$ADB shell pidof "\$PKG" 2>/dev/null | tr -d '[:space:]' || true)
+          kill \$LOGCAT_PID 2>/dev/null || true
+          echo ""
+          echo "━━━ LOGCAT (crashes / JNI) ━━━"
+          grep -E "CRASH|FATAL|died|libneko|JNI|\$PKG|NativeLoader" /tmp/smoke_logcat.txt | head -60 || true
+          echo ""
+          if [ -n "\$ALIVE" ]; then
+            echo "🟢 SMOKE TEST PASSED — process alive (pid \$ALIVE) after 20 s"
+            exit 0
+          else
+            echo "🔴 SMOKE TEST FAILED — process gone after 20 s"
+            tail -100 /tmp/smoke_logcat.txt
+            exit 1
+          fi
+          SCRIPT
+          chmod +x /tmp/smoke.sh
+
       - name: Run smoke test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 12
@@ -306,57 +337,9 @@ jobs:
           ram-size: 2048M
           heap-size: 512M
           disk-size: 4096M
-          emulator-options: >-
-            -no-window
-            -no-audio
-            -no-snapshot
-            -gpu swiftshader_indirect
+          emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
-          script: |
-            PKG="${{ needs.build.outputs.app-pkg }}"
-            ADB="$ANDROID_HOME/platform-tools/adb"
-
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  SMOKE TEST — $PKG"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            # Install APK
-            $ADB install -r OctoGram-arm64.apk
-            echo "✅ APK installed"
-
-            # Clear logcat, start capturing
-            $ADB logcat -c
-            $ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
-            LOGCAT_PID=$!
-
-            # Launch the app
-            $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
-              -a android.intent.action.MAIN \
-              -c android.intent.category.LAUNCHER
-            echo "App launched — watching for 20 s..."
-            sleep 20
-
-            # Check if process survived
-            ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '[:space:]' || true)
-            kill $LOGCAT_PID 2>/dev/null || true
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "  LOGCAT (crashes / warnings)"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            grep -E "CRASH|FATAL|died|libneko|JNI|$PKG|NativeLoader" \
-              /tmp/smoke_logcat.txt | head -60 || true
-
-            echo ""
-            if [ -n "$ALIVE" ]; then
-              echo "🟢 SMOKE TEST PASSED — process alive (pid $ALIVE) after 20 s"
-              exit 0
-            else
-              echo "🔴 SMOKE TEST FAILED — process gone after 20 s"
-              echo "--- Full logcat (last 100 lines) ---"
-              tail -100 /tmp/smoke_logcat.txt
-              exit 1
-            fi
+          script: bash /tmp/smoke.sh
 
   deliver:
     runs-on: ubuntu-latest
@@ -380,8 +363,6 @@ jobs:
           SMOKE_RESULT: ${{ needs.smoke-test.result }}
         run: |
           pip install telethon -q
-          SMOKE_ICON="✅ passed"
-          [ "$SMOKE_RESULT" != "success" ] && SMOKE_ICON="⚠️ check logs"
           python3 - << PYEOF
           import os, asyncio
           from telethon import TelegramClient
