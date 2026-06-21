@@ -164,13 +164,15 @@
     public boolean isLayoutSuppressed();
 }
 
-# Keep package names for all classes referenced by JNI (libneko.so).
-# -repackageclasses moves classes to root pkg, which breaks FindClass() in JNI_OnLoad.
--keeppackagenames org.telegram.**
--keeppackagenames tw.nekomimi.**
--keeppackagenames org.webrtc.**
-
--repackageclasses
+# Keep all classes referenced by JNI (libneko.so FindClass / RegisterNatives).
+# -keeppackagenames was WRONG: it stops name obfuscation but -repackageclasses still
+# physically moves classes to root, so FindClass('org/telegram/...') still fails.
+# -keep class prevents R8 from moving, renaming, or removing these classes entirely.
+-keep class org.telegram.** { *; }
+-keep class tw.nekomimi.** { *; }
+# NOTE: org.webrtc.* is already kept above; keeping ** for subpackages too
+-keep class org.webrtc.** { *; }
+# Removed -repackageclasses — it conflicts with the JNI -keep rules above
 -allowaccessmodification
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
