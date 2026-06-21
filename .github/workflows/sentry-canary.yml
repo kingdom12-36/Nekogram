@@ -69,7 +69,7 @@ jobs:
                   versionName '1.0'
               }
               buildTypes {
-                  release { minifyEnabled false }
+                  debug { minifyEnabled false }
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -128,24 +128,24 @@ jobs:
           }
           EOF
 
-          # Create Android debug keystore so assembleDebug signs the APK
+          # Create Android debug keystore so assembleDebug produces a signed APK
           mkdir -p ~/.android
           keytool -genkey -v -keystore ~/.android/debug.keystore \
             -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 30 \
             -storepass android -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" 2>/dev/null
-          echo "✅ Debug keystore created"
+            -dname "CN=Android Debug,O=Android,C=US" 2>/dev/null || true
+          echo "✅ Debug keystore ready"
 
           cd canary
           gradle wrapper --gradle-version 8.4 --distribution-type bin -q
           chmod +x gradlew
-
-          echo "=== Building ==="
           ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache -q
+
           APK=$(find . -path "*/outputs/apk/debug/*.apk" | head -1)
           cp "$APK" ../canary.apk
           cd ..
           ls -lh canary.apk
+          echo "✅ APK built"
 
       - name: Enable KVM
         run: |
@@ -161,7 +161,7 @@ jobs:
           TOKEN_VAL="${SENTRY_AUTH_TOKEN}"
           cat > /tmp/canary.sh << HEADER
           #!/usr/bin/env bash
-          set -euo pipefail
+          set -uo pipefail
           SENTRY_TOKEN="$TOKEN_VAL"
           HEADER
           cat >> /tmp/canary.sh << 'BODY'
@@ -169,21 +169,23 @@ jobs:
           PKG="io.sentry.canary"
 
           echo "━━━ CANARY CRASH TEST ━━━"
-          $ADB install -r canary.apk && echo "✅ Installed"
 
-          BEFORE=$(curl -s \
+          $ADB install -r canary.apk && echo "✅ APK installed"
+
+          # Count Sentry issues BEFORE launch (|| echo "0" prevents set -e exit on 0 matches)
+          BEFORE_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
-            "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50" \
-            | grep -c '"id"' | tr -d '[:space:]')
-          BEFORE="${BEFORE:-0}"
-          echo "Sentry issues BEFORE: $BEFORE"
+            "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50" || echo "")
+          BEFORE=$(echo "$BEFORE_RESP" | grep -o '"id"' | wc -l | tr -d '[:space:]')
+          echo "Sentry issues BEFORE launch: $BEFORE"
 
-          $ADB logcat -c
+          $ADB logcat -c || true
           $ADB logcat > /tmp/canary_logcat.txt 2>&1 &
           LOGCAT_PID=$!
 
+          echo "Launching canary app..."
           $ADB shell am start -n "$PKG/.MainActivity" \
-            -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
+            -a android.intent.action.MAIN -c android.intent.category.LAUNCHER || true
           echo "Waiting 30 s for crash + Sentry flush..."
           sleep 30
 
@@ -192,23 +194,26 @@ jobs:
           echo ""
           echo "━━━ Crash evidence in logcat ━━━"
           grep -E "SentryCanary|RuntimeException|FATAL|io.sentry.canary" \
-            /tmp/canary_logcat.txt | head -20 || echo "(none)"
+            /tmp/canary_logcat.txt 2>/dev/null | head -20 || echo "(none)"
 
           echo ""
+          echo "━━━ Sentry check ━━━"
           AFTER_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
-            "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50")
-          AFTER=$(echo "$AFTER_RESP" | grep -c '"id"' | tr -d '[:space:]')
-          AFTER="${AFTER:-0}"
-          echo "Sentry issues AFTER: $AFTER"
+            "https://us.sentry.io/api/0/projects/sham-19/android/issues/?query=is:unresolved&limit=50" || echo "")
+          AFTER=$(echo "$AFTER_RESP" | grep -o '"id"' | wc -l | tr -d '[:space:]')
+          echo "Sentry issues AFTER launch: $AFTER"
           echo "$AFTER_RESP" | grep -oP '(?<="title":")[^"]+' | head -5 || true
 
+          echo ""
           if [ "${AFTER}" -gt "${BEFORE}" ]; then
-            echo "🟢 CANARY PASSED — Sentry got the crash! ($BEFORE → $AFTER)"
+            echo "🟢 CANARY PASSED — Sentry received the crash! ($BEFORE → $AFTER issues)"
+            echo "👉 https://sham-19.sentry.io/issues/"
             exit 0
           else
             echo "🔴 CANARY FAILED — Sentry count unchanged ($BEFORE → $AFTER)"
-            tail -50 /tmp/canary_logcat.txt
+            echo "Full logcat:"
+            tail -60 /tmp/canary_logcat.txt
             exit 1
           fi
           BODY
