@@ -64,15 +64,15 @@ jobs:
             -storepass $PASSWORD -keypass $PASSWORD \
             -dname "CN=Linkit, OU=Dev, O=LinkitFortress, L=Global, S=Security, C=US"
 
-      - name: Patch Package Name & arm64 Only
+      - name: Patch Package Name & ABI (arm64 + x86_64)
         id: patch
         run: |
           PKG="org.linkit.octogram${GITHUB_RUN_NUMBER}"
           echo "Package for this build: $PKG"
           sed -i "s/^APP_PACKAGE=.*/APP_PACKAGE=$PKG/" gradle.properties
           grep APP_PACKAGE gradle.properties
-          sed -i "s/include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'/include 'arm64-v8a'/" TMessagesProj_App/build.gradle
-          sed -i 's/include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/include "arm64-v8a"/' TMessagesProj_App/build.gradle
+          sed -i "s/include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'/include 'arm64-v8a', 'x86_64'/" TMessagesProj_App/build.gradle
+          sed -i 's/include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/include "arm64-v8a", "x86_64"/' TMessagesProj_App/build.gradle
           TARGET_JSON="TMessagesProj_App/google-services.json"
           if [ -f "$TARGET_JSON" ]; then
             sed -i "s/\"package_name\": \"[^\"]*\"/\"package_name\": \"$PKG\"/g" "$TARGET_JSON"
@@ -295,7 +295,6 @@ jobs:
           APP_PKG: ${{ needs.build.outputs.app-pkg }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          # Write header with baked-in values (unquoted = variables expand now)
           PKG_VAL="${APP_PKG}"
           TOKEN_VAL="${SENTRY_AUTH_TOKEN}"
           cat > /tmp/smoke.sh << HEADER
@@ -304,7 +303,6 @@ jobs:
           PKG="$PKG_VAL"
           SENTRY_TOKEN="$TOKEN_VAL"
           HEADER
-          # Append body — single-quoted = literal bash, no expansion
           cat >> /tmp/smoke.sh << 'BODY'
           ADB="$ANDROID_HOME/platform-tools/adb"
           SENTRY_ORG="sham-19"
@@ -315,19 +313,17 @@ jobs:
           $ADB install -r OctoGram-arm64.apk
           echo "✅ APK installed"
 
-          # Record launch time so we only look at new Sentry events
           LAUNCH_TS=$(date -u +%s)
           echo "Launch epoch: $LAUNCH_TS"
 
-          # Logcat fallback for native crashes
           $ADB logcat -c
-          $ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
+          $ADB logcat -b crash,main,system *:W > /tmp/smoke_logcat.txt 2>&1 &
           LOGCAT_PID=$!
 
           $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
             -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
-          echo "Launched — waiting 35 s for Sentry SDK to flush..."
-          sleep 35
+          echo "Launched — waiting 40 s for app to settle and Sentry to flush..."
+          sleep 40
 
           ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d "[:space:]" || true)
           kill $LOGCAT_PID 2>/dev/null || true
@@ -345,21 +341,24 @@ jobs:
           SENTRY_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
             "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
-          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null || echo "0")
+          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null | tr -d '[:space:]')
+          SENTRY_COUNT="${SENTRY_COUNT:-0}"
           echo "Open Sentry issues: $SENTRY_COUNT"
-          echo "$SENTRY_RESP" | grep -oP '(?<="title":")[^"]+' | head -5 || true
+          echo "$SENTRY_RESP" | grep -oP '(?<="title":")[^"]+' | head -10 || true
 
           echo ""
-          echo "━━━ Logcat (native crashes) ━━━"
-          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|$PKG" \
-            /tmp/smoke_logcat.txt | head -40 || echo "(no crash lines)"
+          echo "━━━ Logcat (crashes) ━━━"
+          grep -E "CRASH|FATAL|SIGSEGV|AndroidRuntime|Process.*died|libneko|JNI|NativeLoader|$PKG" \
+            /tmp/smoke_logcat.txt | head -60 || echo "(no crash lines)"
 
-          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|libneko.*died|fatal signal" /tmp/smoke_logcat.txt 2>/dev/null || echo "0")
+          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|Process.*died|fatal signal|AndroidRuntime" /tmp/smoke_logcat.txt 2>/dev/null | tr -d '[:space:]')
+          LOGCAT_CRASH="${LOGCAT_CRASH:-0}"
 
           echo ""
-          if [ "$SENTRY_COUNT" -gt "0" ] || [ "$LOGCAT_CRASH" -gt "0" ] || [ -z "$ALIVE" ]; then
-            echo "🔴 SMOKE FAILED — Sentry:$SENTRY_COUNT logcat:$LOGCAT_CRASH alive:${ALIVE:-none}"
-            tail -80 /tmp/smoke_logcat.txt
+          if [ "${SENTRY_COUNT}" -gt 0 ] || [ "${LOGCAT_CRASH}" -gt 0 ] || [ -z "$ALIVE" ]; then
+            echo "🔴 SMOKE FAILED — Sentry:${SENTRY_COUNT} logcat:${LOGCAT_CRASH} alive:${ALIVE:-none}"
+            echo "━━━ Full logcat tail ━━━"
+            tail -100 /tmp/smoke_logcat.txt
             exit 1
           else
             echo "🟢 SMOKE PASSED — 0 Sentry issues, process alive, logcat clean"
@@ -420,7 +419,7 @@ jobs:
           smoke_icon = '✅ passed' if smoke == 'success' else '⚠️ check logs'
           pkg      = os.environ.get('BUILD_PKG', 'unknown')
           num      = os.environ.get('BUILD_NUM', '?')
-          caption  = f"**OctoGram Linkit — Build #{num}**\nPackage: {pkg}\nArch: arm64-v8a\nSmoke test: {smoke_icon}"
+          caption  = f"**OctoGram Linkit — Build #{num}**\nPackage: {pkg}\nArch: arm64-v8a + x86_64\nSmoke test: {smoke_icon}"
           async def main():
               async with TelegramClient(StringSession(session), api_id, api_hash) as client:
                   await client.send_file(channel, 'OctoGram-arm64.apk', caption=caption, force_document=True)
@@ -436,7 +435,7 @@ jobs:
           SMOKE_ICON="✅ passed"
           [ "$SMOKE_RESULT" != "success" ] && SMOKE_ICON="⚠️ check logs"
           PKG="${{ needs.build.outputs.app-pkg }}"
-          printf '## OctoGram Linkit — Build #%s\n\nPackage: `%s`\nCommit: `%s`\nSmoke test: %s\n\narm64-v8a only.' \
+          printf '## OctoGram Linkit — Build #%s\n\nPackage: `%s`\nCommit: `%s`\nSmoke test: %s\n\narm64-v8a + x86_64.' \
             "${{ github.run_number }}" "$PKG" "${{ github.sha }}" "$SMOKE_ICON" > release_notes.md
           gh release delete latest --yes 2>/dev/null || true
           gh release create latest OctoGram-arm64.apk \
