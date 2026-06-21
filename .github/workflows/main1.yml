@@ -66,13 +66,18 @@ jobs:
 
       - name: Patch Package Name & arm64 Only
         run: |
-          sed -i 's/^APP_PACKAGE=.*/APP_PACKAGE=org.linkit.octogram/' gradle.properties
-          grep "APP_PACKAGE" gradle.properties
+          # Each run gets its own unique package ID so builds can coexist on device.
+          # Format: org.linkit.octogram<run_number>  e.g. org.linkit.octogram42
+          PKG="org.linkit.octogram${GITHUB_RUN_NUMBER}"
+          echo "Package for this build: $PKG"
+          sed -i "s/^APP_PACKAGE=.*/APP_PACKAGE=$PKG/" gradle.properties
+          grep APP_PACKAGE gradle.properties
           sed -i "s/include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'/include 'arm64-v8a'/" TMessagesProj_App/build.gradle
           TARGET_JSON="TMessagesProj_App/google-services.json"
           if [ -f "$TARGET_JSON" ]; then
-            sed -i 's/"package_name": "[^"]*"/"package_name": "org.linkit.octogram"/g' "$TARGET_JSON"
+            sed -i "s/\"package_name\": \"[^\"]*\"/\"package_name\": \"$PKG\"/g" "$TARGET_JSON"
           fi
+          echo "APP_PKG=$PKG" >> $GITHUB_ENV
 
       - name: Generate google-services.json
         run: |
@@ -91,7 +96,7 @@ jobs:
                 "client_info": {
                   "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
                   "android_client_info": {
-                    "package_name": "org.linkit.octogram"
+                    "package_name": "$PKG"
                   }
                 },
                 "oauth_client": [],
@@ -139,7 +144,6 @@ jobs:
             echo "keyAlias=Linkit"
             echo "keyPassword=Linkit"
             echo "mapsApiKey=$MAPS_KEY"
-            echo "sentryDsn="
           } > local.properties
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
@@ -191,6 +195,7 @@ jobs:
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" OctoGram-arm64.apk
             echo "Staged: $APK_PATH"
+            echo "APP_PKG=${APP_PKG}" >> $GITHUB_ENV
             ls -lh OctoGram-arm64.apk
           else
             echo "ERROR: No signed APK in outputs/"; exit 1
@@ -217,6 +222,8 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
+          BUILD_PKG: ${{ env.APP_PKG }}
+          BUILD_NUM: ${{ github.run_number }}
         run: |
           pip install telethon -q
           echo "aW1wb3J0IG9zLCBhc3luY2lvCmZyb20gdGVsZXRob24gaW1wb3J0IFRlbGVncmFtQ2xpZW50CmZyb20gdGVsZXRob24uc2Vzc2lvbnMgaW1wb3J0IFN0cmluZ1Nlc3Npb24KCmFwaV9pZCAgID0gaW50KG9zLmVudmlyb25bJ1RFTEVHUkFNX0FQSV9JRCddKQphcGlfaGFzaCA9IG9zLmVudmlyb25bJ1RFTEVHUkFNX0FQSV9IQVNIJ10Kc2Vzc2lvbiAgPSBvcy5lbnZpcm9uWydURUxFR1JBTV9DTElFTlQnXQpjaGFubmVsICA9IC0xMDA0NDU3NTY1MjQyCmNhcHRpb24gID0gJyoqT2N0b0dyYW0gTGlua2l0IC0gTGF0ZXN0IEJ1aWxkKipcblBhY2thZ2U6IG9yZy5saW5raXQub2N0b2dyYW1cbkFyY2hpdGVjdHVyZTogYXJtNjQtdjhhXG5CdWlsdCB2aWEgR2l0SHViIEFjdGlvbnMnCgphc3luYyBkZWYgbWFpbigpOgogICAgYXN5bmMgd2l0aCBUZWxlZ3JhbUNsaWVudChTdHJpbmdTZXNzaW9uKHNlc3Npb24pLCBhcGlfaWQsIGFwaV9oYXNoKSBhcyBjbGllbnQ6CiAgICAgICAgYXdhaXQgY2xpZW50LnNlbmRfZmlsZShjaGFubmVsLCAnT2N0b0dyYW0tYXJtNjQuYXBrJywgY2FwdGlvbj1jYXB0aW9uLCBmb3JjZV9kb2N1bWVudD1UcnVlKQogICAgICAgIHByaW50KCdBUEsgc2VudCB0byBUZWxlZ3JhbSBzdWNjZXNzZnVsbHkhJykKCmFzeW5jaW8ucnVuKG1haW4oKSkK" | base64 -d > /tmp/tg_send.py
@@ -226,10 +233,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '## OctoGram Linkit\n\nPackage: org.linkit.octogram\nCommit: %s\n\narm64-v8a only.' "${{ github.sha }}" > release_notes.md
+          printf '## OctoGram Linkit — Build #%s\n\nPackage: %s\nCommit: %s\n\narm64-v8a only.' "${{ github.run_number }}" "$APP_PKG" "${{ github.sha }}" > release_notes.md
           gh release delete latest --yes 2>/dev/null || true
           git push origin :refs/tags/latest 2>/dev/null || true
           gh release create latest OctoGram-arm64.apk \
-            --title "OctoGram Linkit - $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --title "OctoGram Linkit — Build #${{ github.run_number }} — $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
             --latest
