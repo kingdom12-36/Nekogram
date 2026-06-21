@@ -73,6 +73,7 @@ jobs:
           sed -i "s/^APP_PACKAGE=.*/APP_PACKAGE=$PKG/" gradle.properties
           grep APP_PACKAGE gradle.properties
           sed -i "s/include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'/include 'arm64-v8a'/" TMessagesProj_App/build.gradle
+          sed -i 's/include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"/include "arm64-v8a"/' TMessagesProj_App/build.gradle
           TARGET_JSON="TMessagesProj_App/google-services.json"
           if [ -f "$TARGET_JSON" ]; then
             sed -i "s/\"package_name\": \"[^\"]*\"/\"package_name\": \"$PKG\"/g" "$TARGET_JSON"
@@ -128,7 +129,7 @@ jobs:
           FORCE_COLOR: "1"
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          APP_ID: "org.linkit.octogram"
+          APP_ID: ${{ env.APP_PKG }}
           APP_NAME: "OctoGram Linkit"
           APP_DOWNLOAD_URL: "https://telegram.org/dl"
           APP_SOURCES_URL: "https://github.com/kingdom12-36/OctoGram"
@@ -146,7 +147,12 @@ jobs:
             echo "keyAlias=Linkit"
             echo "keyPassword=Linkit"
             echo "mapsApiKey=$MAPS_KEY"
+            echo "apiId=$TELEGRAM_API_ID"
+            echo "apiHash=$TELEGRAM_API_HASH"
           } > local.properties
+          echo "=== local.properties (redacted) ==="
+          grep -v "apiId\|apiHash\|storePassword\|keyPassword" local.properties
+          echo "apiId=<set>" && echo "apiHash=<set>"
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
       - name: Fix Gradle Properties
@@ -210,6 +216,7 @@ jobs:
           echo "=== PACKAGE ===" && $BT/aapt dump badging OctoGram-arm64.apk 2>&1 | grep -E "package:|testOnly|native-code|sdkVersion" || true
           echo "=== SIGNATURE ===" && $BT/apksigner verify --verbose OctoGram-arm64.apk 2>&1 | head -5 || true
           echo "=== ZIP ===" && (unzip -t OctoGram-arm64.apk > /dev/null 2>&1 && echo "ZIP valid" || echo "ZIP CORRUPT")
+          echo "=== API_ID CHECK ===" && ($BT/aapt dump xmltree OctoGram-arm64.apk AndroidManifest.xml 2>/dev/null | grep -i "api\|app_id" || true)
 
       - name: Upload APK as Actions Artifact
         uses: actions/upload-artifact@v4
