@@ -154,9 +154,6 @@ jobs:
           echo "apiId=<set>" && echo "apiHash=<set>"
           [ -d "scripts" ] && ./scripts/setup.sh || true
 
-      # ─────────────────────────────────────────────────────────────────
-      # PRE-BUILD SANITY CHECK
-      # ─────────────────────────────────────────────────────────────────
       - name: Pre-Build Sanity Check
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -273,14 +270,15 @@ jobs:
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────
-  # SMOKE TEST — runs an ARM64 emulator in the CI VM (no cloud auth)
-  # Installs the APK, launches it, waits 20 s, checks it is still alive.
+  # SMOKE TEST
+  # Uses an x86_64 emulator with KVM — boots in ~2 min, translates arm64
+  # APKs automatically (Android's libhoudini, available on google_apis
+  # images API 28+). Much faster than arm64-v8a which needs QEMU full
+  # emulation and times out on GitHub runners.
   # ─────────────────────────────────────────────────────────────────────
   smoke-test:
     runs-on: ubuntu-latest
     needs: build
-    # Don't block delivery on test failure — still sends APK
-    # Change to true once you're confident builds are stable
     continue-on-error: true
 
     steps:
@@ -289,110 +287,80 @@ jobs:
         with:
           name: OctoGram-arm64
 
-      - name: Enable KVM (hardware acceleration)
+      - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - name: Run smoke test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 12
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          ram-size: 2048M
+          heap-size: 512M
+          disk-size: 4096M
+          emulator-options: >-
+            -no-window
+            -no-audio
+            -no-snapshot
+            -gpu swiftshader_indirect
+          disable-animations: true
+          script: |
+            PKG="${{ needs.build.outputs.app-pkg }}"
+            ADB="$ANDROID_HOME/platform-tools/adb"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "  SMOKE TEST — $PKG"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      - name: Install emulator system image (API 30 arm64)
-        run: |
-          sdkmanager --install \
-            "system-images;android-30;google_apis;arm64-v8a" \
-            "emulator" \
-            "platform-tools" \
-            "platforms;android-30" \
-            --channel=0
-          echo "no" | avdmanager create avd \
-            --name smoke_avd \
-            --package "system-images;android-30;google_apis;arm64-v8a" \
-            --device "pixel_3a" \
-            --force
+            # Install APK
+            $ADB install -r OctoGram-arm64.apk
+            echo "✅ APK installed"
 
-      - name: Boot emulator
-        timeout-minutes: 8
-        run: |
-          $ANDROID_HOME/emulator/emulator \
-            -avd smoke_avd \
-            -no-window \
-            -no-audio \
-            -no-snapshot \
-            -gpu swiftshader_indirect \
-            -memory 2048 &
+            # Clear logcat, start capturing
+            $ADB logcat -c
+            $ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
+            LOGCAT_PID=$!
 
-          # Wait for the emulator to fully boot
-          echo "Waiting for emulator boot..."
-          $ANDROID_HOME/platform-tools/adb wait-for-device
-          until $ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | grep -q "1"; do
-            sleep 4
-          done
-          echo "Emulator is ready ✅"
+            # Launch the app
+            $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
+              -a android.intent.action.MAIN \
+              -c android.intent.category.LAUNCHER
+            echo "App launched — watching for 20 s..."
+            sleep 20
 
-      - name: Install APK on emulator
-        run: |
-          PKG="${{ needs.build.outputs.app-pkg }}"
-          echo "Installing $PKG ..."
-          $ANDROID_HOME/platform-tools/adb install -r OctoGram-arm64.apk
-          echo "✅ Installed"
+            # Check if process survived
+            ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '[:space:]' || true)
+            kill $LOGCAT_PID 2>/dev/null || true
 
-      - name: Launch app and smoke-test for crashes
-        run: |
-          PKG="${{ needs.build.outputs.app-pkg }}"
-          ADB="$ANDROID_HOME/platform-tools/adb"
-
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  SMOKE TEST — launching $PKG"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-          # Start capturing logcat (crash buffer + main) in background
-          $ADB logcat -c
-          $ADB logcat -b crash,main *:W > /tmp/smoke_logcat.txt 2>&1 &
-          LOGCAT_PID=$!
-
-          # Launch the app
-          $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
-            -a android.intent.action.MAIN \
-            -c android.intent.category.LAUNCHER
-
-          echo "Waiting 20 s to observe stability..."
-          sleep 20
-
-          # Check if the app process is alive
-          ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null || echo "")
-          kill $LOGCAT_PID 2>/dev/null || true
-
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  LOGCAT (crashes / warnings)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          grep -E "CRASH|FATAL|died|libneko|$PKG|NativeLoader|JNI" /tmp/smoke_logcat.txt | head -40 || true
-
-          echo ""
-          if [ -n "$ALIVE" ]; then
-            echo "🟢 SMOKE TEST PASSED — app is alive (pid $ALIVE) after 20 s"
-            exit 0
-          else
-            echo "🔴 SMOKE TEST FAILED — app process not found after 20 s"
             echo ""
-            echo "Full crash log:"
-            cat /tmp/smoke_logcat.txt | head -80
-            exit 1
-          fi
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "  LOGCAT (crashes / warnings)"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            grep -E "CRASH|FATAL|died|libneko|JNI|$PKG|NativeLoader" \
+              /tmp/smoke_logcat.txt | head -60 || true
+
+            echo ""
+            if [ -n "$ALIVE" ]; then
+              echo "🟢 SMOKE TEST PASSED — process alive (pid $ALIVE) after 20 s"
+              exit 0
+            else
+              echo "🔴 SMOKE TEST FAILED — process gone after 20 s"
+              echo "--- Full logcat (last 100 lines) ---"
+              tail -100 /tmp/smoke_logcat.txt
+              exit 1
+            fi
 
   deliver:
     runs-on: ubuntu-latest
     needs: [build, smoke-test]
-    # Always deliver even if smoke-test flagged an issue
     if: always() && needs.build.result == 'success'
 
     steps:
@@ -412,8 +380,8 @@ jobs:
           SMOKE_RESULT: ${{ needs.smoke-test.result }}
         run: |
           pip install telethon -q
-          SMOKE_ICON="✅"
-          [ "$SMOKE_RESULT" != "success" ] && SMOKE_ICON="⚠️"
+          SMOKE_ICON="✅ passed"
+          [ "$SMOKE_RESULT" != "success" ] && SMOKE_ICON="⚠️ check logs"
           python3 - << PYEOF
           import os, asyncio
           from telethon import TelegramClient
@@ -422,10 +390,11 @@ jobs:
           api_hash = os.environ['TELEGRAM_API_HASH']
           session  = os.environ['TELEGRAM_CLIENT']
           channel  = -1004457565242
-          smoke    = os.environ.get('SMOKE_ICON', '❓')
+          smoke    = os.environ.get('SMOKE_RESULT', '?')
+          smoke_icon = '✅ passed' if smoke == 'success' else '⚠️ check logs'
           pkg      = os.environ.get('BUILD_PKG', 'unknown')
           num      = os.environ.get('BUILD_NUM', '?')
-          caption  = f"**OctoGram Linkit — Build #{num}**\nPackage: {pkg}\nArch: arm64-v8a\nSmoke test: {smoke}"
+          caption  = f"**OctoGram Linkit — Build #{num}**\nPackage: {pkg}\nArch: arm64-v8a\nSmoke test: {smoke_icon}"
           async def main():
               async with TelegramClient(StringSession(session), api_id, api_hash) as client:
                   await client.send_file(channel, 'OctoGram-arm64.apk', caption=caption, force_document=True)
@@ -444,10 +413,11 @@ jobs:
           printf '## OctoGram Linkit — Build #%s\n\nPackage: `%s`\nCommit: `%s`\nSmoke test: %s\n\narm64-v8a only.' \
             "${{ github.run_number }}" "$PKG" "${{ github.sha }}" "$SMOKE_ICON" > release_notes.md
           gh release delete latest --yes 2>/dev/null || true
-          git push origin :refs/tags/latest 2>/dev/null || true
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git fetch origin
+          git tag -f latest HEAD
+          git push origin latest --force
           gh release create latest OctoGram-arm64.apk \
             --title "OctoGram Linkit — Build #${{ github.run_number }} — $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
