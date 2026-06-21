@@ -244,16 +244,26 @@ jobs:
       - name: Locate & Stage APK
         id: stage
         run: |
+          echo "=== All APKs built ==="
           find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | sort
-          APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -i "arm64" | head -1)
-          [ -z "$APK_PATH" ] && APK_PATH=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | head -1)
-          if [ -n "$APK_PATH" ]; then
-            cp "$APK_PATH" OctoGram-arm64.apk
-            echo "Staged: $APK_PATH"
+          APK_ARM=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -i "arm64" | grep -v "universal" | head -1)
+          [ -z "$APK_ARM" ] && APK_ARM=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -v "universal" | head -1)
+          APK_UNI=$(find . -path "*/outputs/apk*" -name "*.apk" -not -path "*/.gradle/*" 2>/dev/null | grep -i "universal" | head -1)
+          if [ -n "$APK_ARM" ]; then
+            cp "$APK_ARM" OctoGram-arm64.apk
+            echo "arm64 APK staged: $APK_ARM"
             ls -lh OctoGram-arm64.apk
             echo "apk-name=OctoGram-arm64.apk" >> $GITHUB_OUTPUT
           else
-            echo "ERROR: No signed APK found"; exit 1
+            echo "ERROR: No arm64 APK found"; exit 1
+          fi
+          if [ -n "$APK_UNI" ]; then
+            cp "$APK_UNI" OctoGram-universal.apk
+            echo "universal APK staged: $APK_UNI"
+            ls -lh OctoGram-universal.apk
+          else
+            echo "WARN: No universal APK — using arm64 as smoke-test fallback"
+            cp OctoGram-arm64.apk OctoGram-universal.apk
           fi
 
       - name: Diagnose APK
@@ -271,16 +281,23 @@ jobs:
           path: OctoGram-arm64.apk
           retention-days: 7
 
+      - name: Upload Universal APK (for smoke test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: OctoGram-universal
+          path: OctoGram-universal.apk
+          retention-days: 7
+
   smoke-test:
     runs-on: ubuntu-latest
     needs: build
     continue-on-error: true
 
     steps:
-      - name: Download APK artifact
+      - name: Download universal APK artifact (has arm64 + x86_64 so emulator can run it)
         uses: actions/download-artifact@v4
         with:
-          name: OctoGram-arm64
+          name: OctoGram-universal
 
       - name: Enable KVM
         run: |
@@ -310,7 +327,7 @@ jobs:
 
           echo "━━━ SENTRY SMOKE TEST — $PKG ━━━"
 
-          $ADB install -r OctoGram-arm64.apk
+          $ADB install -r OctoGram-universal.apk
           echo "✅ APK installed"
 
           LAUNCH_TS=$(date -u +%s)
@@ -442,3 +459,4 @@ jobs:
             --title "OctoGram Linkit — Build #${{ github.run_number }} — $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
             --latest
+
