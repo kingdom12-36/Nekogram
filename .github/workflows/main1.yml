@@ -394,11 +394,6 @@ jobs:
           printf '## OctoGram Linkit — Build #%s\n\nPackage: `%s`\nCommit: `%s`\nSmoke test: %s\n\narm64-v8a only.' \
             "${{ github.run_number }}" "$PKG" "${{ github.sha }}" "$SMOKE_ICON" > release_notes.md
           gh release delete latest --yes 2>/dev/null || true
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git fetch origin
-          git tag -f latest HEAD
-          git push origin latest --force
           gh release create latest OctoGram-arm64.apk \
             --title "OctoGram Linkit — Build #${{ github.run_number }} — $(date -u '+%Y-%m-%d %H:%M UTC')" \
             --notes-file release_notes.md \
