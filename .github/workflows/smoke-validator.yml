@@ -1,69 +1,79 @@
-name: Smoke Test Validator (Crash Regression)
+name: Smoke Validator (Latest Build)
 
-# PURPOSE: Verify the smoke-test catches real crashes by replaying known-bad
-#          and known-good APKs through the emulator.
-#
-#   Run #65 → EXPECTED: CRASH  (Bug: API_ID=0, native abort at launch)
-#   Run #67 → EXPECTED: CRASH  (Bug: -repackageclasses breaks JNI FindClass)
-#   Run #68 → EXPECTED: PASS   (Both bugs fixed — should stay alive)
-#
-# If #65 and #67 CRASH and #68 PASSES → smoke test is reliable.
+# PURPOSE: Download the latest successful OctoGram build, install it on an
+#          emulator, and check Sentry + logcat for crashes.
+#          Run manually or automatically after each main build.
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Build OctoGram (Auto-Key Factory)"]
+    types: [completed]
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - run_num: "65"
-            artifact_id: "7773650299"
-            pkg: "org.linkit.octogram65"
-            expected: "crash"
-            reason: "API_ID=0 causes libneko.so to abort in JNI_OnLoad"
-
-          - run_num: "67"
-            artifact_id: "7775721430"
-            pkg: "org.linkit.octogram67"
-            expected: "crash"
-            reason: "-repackageclasses breaks FindClass in libneko.so"
-
-          - run_num: "68"
-            artifact_id: "7776662716"
-            pkg: "org.linkit.octogram68"
-            expected: "pass"
-            reason: "Both bugs fixed — app should launch cleanly"
-
-    name: "Run #${{ matrix.run_num }} (expected: ${{ matrix.expected }})"
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      - name: Print test plan
+      - name: Find latest successful build artifact
+        id: find_artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Run #${{ matrix.run_num }}"
-          echo "  Artifact: ${{ matrix.artifact_id }}"
-          echo "  Package : ${{ matrix.pkg }}"
-          echo "  Expected: ${{ matrix.expected }}"
-          echo "  Reason  : ${{ matrix.reason }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Fetching latest successful run of main1.yml..."
+          RUNS=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main1.yml/runs?status=success&per_page=5")
 
-      - name: Download APK from run #${{ matrix.run_num }}
+          RUN_ID=$(echo "$RUNS" | grep -oP '"id":\K[0-9]+' | head -1)
+          RUN_NUM=$(echo "$RUNS" | grep -oP '"run_number":\K[0-9]+' | head -1)
+
+          if [ -z "$RUN_ID" ]; then
+            echo "❌ No successful runs found for main1.yml"
+            exit 1
+          fi
+          echo "✅ Latest successful run: #$RUN_NUM (id=$RUN_ID)"
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "run_num=$RUN_NUM" >> $GITHUB_OUTPUT
+
+      - name: Download APK from latest run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          RUN_ID="${{ steps.find_artifact.outputs.run_id }}"
+
+          # Get artifact list for this run
+          ARTIFACTS=$(curl -s \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts")
+
+          ARTIFACT_ID=$(echo "$ARTIFACTS" | grep -oP '"id":\K[0-9]+' | head -1)
+          ARTIFACT_NAME=$(echo "$ARTIFACTS" | grep -oP '"name":"\K[^"]+' | head -1)
+
+          if [ -z "$ARTIFACT_ID" ]; then
+            echo "❌ No artifact found for run $RUN_ID (may have expired)"
+            echo "Artifacts response: $(echo $ARTIFACTS | head -c 300)"
+            exit 1
+          fi
+
+          echo "Downloading artifact: $ARTIFACT_NAME (id=$ARTIFACT_ID)"
           curl -sL \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ matrix.artifact_id }}/zip" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
             -o artifact.zip
+
           unzip -o artifact.zip
-          ls -lh *.apk || { echo "❌ No APK in artifact"; exit 1; }
+          ls -lh *.apk 2>/dev/null || { echo "❌ No APK in artifact"; exit 1; }
           mv "$(ls *.apk | head -1)" test.apk
-          echo "Ready: test.apk ($(du -sh test.apk | cut -f1))"
+          echo "✅ Ready: test.apk ($(du -sh test.apk | cut -f1)) from run #${{ steps.find_artifact.outputs.run_num }}"
 
       - name: Enable KVM
         run: |
@@ -71,66 +81,86 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
 
-      - name: Write test script
+      - name: Write smoke script
         env:
-          TEST_PKG: ${{ matrix.pkg }}
-          TEST_EXPECTED: ${{ matrix.expected }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          cat > /tmp/validate.sh << SCRIPT
+          cat > /tmp/smoke.sh << 'ENDSCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
-          PKG="${TEST_PKG}"
-          EXPECTED="${TEST_EXPECTED}"
-          ADB="\$ANDROID_HOME/platform-tools/adb"
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          SENTRY_TOKEN="${SENTRY_AUTH_TOKEN}"
+          SENTRY_ORG="sham-19"
+          SENTRY_PROJECT="android"
+
+          # Resolve package name from the APK itself
+          AAPT="$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)/aapt"
+          PKG=$($AAPT dump badging test.apk 2>/dev/null | grep "^package:" | grep -oP "name='\K[^']+")
+          echo "Package: $PKG"
 
           echo "━━━ INSTALLING ━━━"
-          \$ADB install -r test.apk
-          echo "✅ Installed \$PKG"
+          $ADB install -r test.apk && echo "✅ Installed"
 
-          \$ADB logcat -c
-          \$ADB logcat -b crash,main *:W > /tmp/logcat.txt 2>&1 &
-          LOGCAT_PID=\$!
+          # Mark start time for Sentry query
+          LAUNCH_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          echo "━━━ LAUNCHING — watching 25 s ━━━"
-          \$ADB shell am start -n "\$PKG/org.telegram.ui.LaunchActivity" \
+          # Logcat fallback
+          $ADB logcat -c
+          $ADB logcat -b crash,main *:W > /tmp/logcat.txt 2>&1 &
+          LOGCAT_PID=$!
+
+          echo "━━━ LAUNCHING — waiting 40 s ━━━"
+          $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
             -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
-          sleep 25
+          sleep 40
 
-          ALIVE=\$(\$ADB shell pidof "\$PKG" 2>/dev/null | tr -d '[:space:]' || true)
-          kill \$LOGCAT_PID 2>/dev/null || true
-
-          echo ""
-          echo "━━━ LOGCAT (crashes / JNI) ━━━"
-          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|\$PKG" \
-            /tmp/logcat.txt | head -60 || echo "(no matching lines)"
+          ALIVE=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '[:space:]' || true)
+          kill $LOGCAT_PID 2>/dev/null || true
 
           echo ""
-          ACTUAL="pass"
-          [ -z "\$ALIVE" ] && ACTUAL="crash"
-
-          if [ "\$ACTUAL" = "crash" ]; then
-            echo "📛 App process DIED within 25 s"
-          else
-            echo "💚 App process ALIVE (pid \$ALIVE) after 25 s"
-          fi
+          echo "━━━ Process ━━━"
+          [ -n "$ALIVE" ] && echo "💚 Alive (pid $ALIVE)" || echo "📛 Process dead"
 
           echo ""
-          if [ "\$ACTUAL" = "\$EXPECTED" ]; then
-            echo "✅ VALIDATOR CORRECT — expected=\$EXPECTED actual=\$ACTUAL"
-            exit 0
-          else
-            echo "❌ VALIDATOR WRONG — expected=\$EXPECTED got=\$ACTUAL"
-            echo "--- This means the smoke test has a BLIND SPOT ---"
-            echo "--- Full logcat ---"
-            tail -120 /tmp/logcat.txt
+          echo "━━━ Sentry issues ━━━"
+          SENTRY_RESP=$(curl -s \
+            -H "Authorization: Bearer $SENTRY_TOKEN" \
+            "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
+          SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null || echo "0")
+          echo "Open issues in Sentry: $SENTRY_COUNT"
+          echo "$SENTRY_RESP" | grep -oP '(?<="title":")[^"]+' | nl | head -10 || true
+
+          echo ""
+          echo "━━━ Logcat (crashes) ━━━"
+          grep -E "CRASH|FATAL|SIGSEGV|died|libneko|JNI|NativeLoader|$PKG" \
+            /tmp/logcat.txt | head -50 || echo "(no crash lines)"
+
+          LOGCAT_CRASH=$(grep -cE "FATAL EXCEPTION|SIGSEGV|libneko.*died|fatal signal" \
+            /tmp/logcat.txt 2>/dev/null || echo "0")
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ "$SENTRY_COUNT" -gt "0" ] || [ "$LOGCAT_CRASH" -gt "0" ] || [ -z "$ALIVE" ]; then
+            echo "🔴 VALIDATOR FAILED"
+            echo "   Sentry issues : $SENTRY_COUNT"
+            echo "   Logcat crashes: $LOGCAT_CRASH"
+            echo "   Process alive : ${ALIVE:-NONE}"
+            echo ""
+            echo "--- Full logcat (last 100 lines) ---"
+            tail -100 /tmp/logcat.txt
             exit 1
+          else
+            echo "🟢 VALIDATOR PASSED"
+            echo "   Sentry issues : 0"
+            echo "   Logcat crashes: 0"
+            echo "   Process alive : $ALIVE"
+            exit 0
           fi
-          SCRIPT
-          chmod +x /tmp/validate.sh
+          ENDSCRIPT
+          chmod +x /tmp/smoke.sh
 
-      - name: Boot emulator + run test
+      - name: Boot emulator + run validator
         uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 14
         with:
@@ -143,27 +173,18 @@ jobs:
           disk-size: 4096M
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
-          script: bash /tmp/validate.sh
+          script: bash /tmp/smoke.sh
 
-  summary:
-    runs-on: ubuntu-latest
-    needs: validate
-    if: always()
-    steps:
-      - name: Print results table
+      - name: Post result summary
+        if: always()
         run: |
           echo ""
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║        SMOKE TEST VALIDATOR — FINAL RESULTS             ║"
-          echo "╠══════════╦═══════════════════╦═════════════════════════╣"
-          echo "║ Build    ║ Bug               ║ Expected result         ║"
-          echo "╠══════════╬═══════════════════╬═════════════════════════╣"
-          echo "║ #65      ║ API_ID=0          ║ CRASH                   ║"
-          echo "║ #67      ║ -repackageclasses ║ CRASH                   ║"
-          echo "║ #68      ║ Both fixed        ║ PASS                    ║"
-          echo "╚══════════╩═══════════════════╩═════════════════════════╝"
+          echo "╔══════════════════════════════════════╗"
+          echo "║     SMOKE VALIDATOR — SUMMARY        ║"
+          echo "╠══════════════════════════════════════╣"
+          echo "║ Build tested : Run #${{ steps.find_artifact.outputs.run_num }}"
+          echo "║ Sentry org   : sham-19.sentry.io     ║"
+          echo "║ Sentry proj  : android               ║"
+          echo "╚══════════════════════════════════════╝"
           echo ""
-          echo "Matrix overall: ${{ needs.validate.result }}"
-          echo "→ Check each matrix job above for CORRECT / WRONG verdict."
-          echo "→ All CORRECT = smoke-test reliably catches real crashes."
-          echo "→ Any WRONG   = blind spot, needs investigation."
+          echo "→ Full crash details at: https://sham-19.sentry.io/issues/"
