@@ -177,7 +177,7 @@ jobs:
           for xml_file in DEFAULT_DIR.glob("*.xml"):
               try:
                   text = xml_file.read_text(encoding="utf-8")
-                  for m in re.finditer(r'name="([^"]+)"', text):
+                  for m in re.finditer(r'<string\\s+name="([^"]+)"', text):
                       default_names.add(m.group(1))
               except Exception:
                   pass
@@ -195,7 +195,7 @@ jobs:
                       text = xml_file.read_text(encoding="utf-8")
                   except Exception:
                       continue
-                  for m in re.finditer(r'name="([^"]+)"', text):
+                  for m in re.finditer(r'<string\\s+name="([^"]+)"', text):
                       name = m.group(1)
                       if name not in default_names:
                           missing[name].add(locale_dir.name)
