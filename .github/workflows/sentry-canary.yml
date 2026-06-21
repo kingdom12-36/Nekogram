@@ -133,8 +133,8 @@ jobs:
           chmod +x gradlew
 
           echo "=== Building ==="
-          ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache -q
-          APK=$(find . -path "*/outputs/apk/release/*.apk" | head -1)
+          ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache -q
+          APK=$(find . -path "*/outputs/apk/debug/*.apk" | head -1)
           cp "$APK" ../canary.apk
           cd ..
           ls -lh canary.apk
