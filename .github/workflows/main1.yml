@@ -115,9 +115,9 @@ jobs:
             "configuration_version": "1"
           }
           JSON_EOF
-            # Substitute literal $PKG placeholder (heredoc used single quotes)
-            sed -i "s/\$PKG/$PKG/g" "$TARGET_JSON"
-            echo "Stub google-services.json created for $PKG"
+            # Substitute literal $PKG placeholder — use $APP_PKG from GITHUB_ENV (different shell)
+            sed -i "s/\$PKG/${APP_PKG}/g" "$TARGET_JSON"
+            echo "Stub google-services.json created for ${APP_PKG}"
           else
             echo "google-services.json already exists."
           fi
