@@ -115,7 +115,9 @@ jobs:
             "configuration_version": "1"
           }
           JSON_EOF
-            echo "Stub google-services.json created for org.linkit.octogram"
+            # Substitute literal $PKG placeholder (heredoc used single quotes)
+            sed -i "s/\$PKG/$PKG/g" "$TARGET_JSON"
+            echo "Stub google-services.json created for $PKG"
           else
             echo "google-services.json already exists."
           fi
