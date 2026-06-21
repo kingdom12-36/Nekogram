@@ -295,12 +295,18 @@ jobs:
           APP_PKG: ${{ needs.build.outputs.app-pkg }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          cat > /tmp/smoke.sh << 'ENDSCRIPT'
+          # Write header with baked-in values (unquoted = variables expand now)
+          PKG_VAL="${APP_PKG}"
+          TOKEN_VAL="${SENTRY_AUTH_TOKEN}"
+          cat > /tmp/smoke.sh << HEADER
           #!/usr/bin/env bash
           set -euo pipefail
-          PKG="${APP_PKG}"
+          PKG="$PKG_VAL"
+          SENTRY_TOKEN="$TOKEN_VAL"
+          HEADER
+          # Append body — single-quoted = literal bash, no expansion
+          cat >> /tmp/smoke.sh << 'BODY'
           ADB="$ANDROID_HOME/platform-tools/adb"
-          SENTRY_TOKEN="${SENTRY_AUTH_TOKEN}"
           SENTRY_ORG="sham-19"
           SENTRY_PROJECT="android"
 
@@ -359,7 +365,7 @@ jobs:
             echo "🟢 SMOKE PASSED — 0 Sentry issues, process alive, logcat clean"
             exit 0
           fi
-          ENDSCRIPT
+          BODY
           chmod +x /tmp/smoke.sh
 
       - name: Run smoke test on emulator
@@ -383,6 +389,9 @@ jobs:
     if: always() && needs.build.result == 'success'
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download APK artifact
         uses: actions/download-artifact@v4
         with:
