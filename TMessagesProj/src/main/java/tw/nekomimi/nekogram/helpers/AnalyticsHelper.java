@@ -43,9 +43,20 @@ public class AnalyticsHelper {
         if (userId == null || userId.length() < 32) {
             preferences.edit().putString("userId", userId = generateUserID()).apply();
         }
-        firebaseAnalytics = FirebaseAnalytics.getInstance(application);
-        firebaseAnalytics.setAnalyticsCollectionEnabled(true);
-        firebaseAnalytics.setUserId(userId);
+
+        // Wrap Firebase Analytics init in try-catch — a missing, stub, or
+        // malformed google-services.json causes FirebaseApp to throw
+        // IllegalStateException which would otherwise kill the process.
+        try {
+            firebaseAnalytics = FirebaseAnalytics.getInstance(application);
+            firebaseAnalytics.setAnalyticsCollectionEnabled(true);
+            firebaseAnalytics.setUserId(userId);
+        } catch (Exception e) {
+            FileLog.e("Firebase Analytics init failed (non-fatal): " + e.getMessage());
+            firebaseAnalytics = null;
+            // Do not disable analytics entirely — Sentry still works below.
+        }
+
         // Guard: only init Sentry when a valid DSN is configured.
         // Without this check the app crashes on startup when SENTRY_DSN is
         // empty or the string literal "null" (produced when sentryDsn is
@@ -87,7 +98,7 @@ public class AnalyticsHelper {
         breadcrumb.setData("state", lifecycle);
         breadcrumb.setData("screen", getFragmentName(fragment));
         Sentry.addBreadcrumb(breadcrumb);
-        if ("created".equals(lifecycle)) {
+        if ("created".equals(lifecycle) && firebaseAnalytics != null) {
             firebaseAnalytics.logEvent(FirebaseAnalytics.Event.SCREEN_VIEW, null);
         }
     }
@@ -98,7 +109,7 @@ public class AnalyticsHelper {
     }
 
     public static void trackEvent(String event, HashMap<String, String> map) {
-        if (analyticsDisabled) return;
+        if (analyticsDisabled || firebaseAnalytics == null) return;
         Bundle bundle = new Bundle();
         for (String key : map.keySet()) {
             bundle.putString(key, map.get(key));
@@ -113,7 +124,10 @@ public class AnalyticsHelper {
     public static void setAnalyticsDisabled() {
         AnalyticsHelper.analyticsDisabled = true;
         if (BuildConfig.DEBUG) return;
-        FirebaseAnalytics.getInstance(ApplicationLoader.applicationContext).setAnalyticsCollectionEnabled(false);
+        if (firebaseAnalytics != null) {
+            FirebaseAnalytics.getInstance(ApplicationLoader.applicationContext)
+                    .setAnalyticsCollectionEnabled(false);
+        }
         preferences.edit().putBoolean("analyticsDisabled", true).apply();
     }
 
