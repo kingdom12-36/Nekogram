@@ -164,6 +164,12 @@
     public boolean isLayoutSuppressed();
 }
 
+# Keep package names for all classes referenced by JNI (libneko.so).
+# -repackageclasses moves classes to root pkg, which breaks FindClass() in JNI_OnLoad.
+-keeppackagenames org.telegram.**
+-keeppackagenames tw.nekomimi.**
+-keeppackagenames org.webrtc.**
+
 -repackageclasses
 -allowaccessmodification
 -keepattributes SourceFile,LineNumberTable
