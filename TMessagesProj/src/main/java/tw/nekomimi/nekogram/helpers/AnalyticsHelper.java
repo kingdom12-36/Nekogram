@@ -2,6 +2,7 @@ package tw.nekomimi.nekogram.helpers;
 
 import android.app.Application;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
 
 import com.google.firebase.analytics.FirebaseAnalytics;
@@ -24,43 +25,60 @@ import tw.nekomimi.nekogram.Extra;
 
 public class AnalyticsHelper {
     private static SharedPreferences preferences;
-
     private static FirebaseAnalytics firebaseAnalytics;
 
     public static boolean sendBugReport = true;
     public static boolean analyticsDisabled = false;
     public static String userId = null;
 
+    /**
+     * Returns true when running on an emulator/CI environment.
+     * Firebase Analytics and FCM require Google Play Services which is outdated
+     * on CI emulator images — skip all GMS calls to prevent crash loops.
+     */
+    private static boolean isEmulator() {
+        return Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || Build.MANUFACTURER.contains("Genymotion")
+                || (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
+                || "google_sdk".equals(Build.PRODUCT);
+    }
+
     public static void start(Application application) {
         preferences = application.getSharedPreferences("nekoanalytics", Application.MODE_PRIVATE);
         analyticsDisabled = !Extra.FORCE_ANALYTICS && preferences.getBoolean("analyticsDisabled", false);
         sendBugReport = Extra.FORCE_ANALYTICS || preferences.getBoolean("sendBugReport", true);
+
         if (analyticsDisabled) {
             FileLog.d("Analytics: userId = disabled");
             return;
         }
+
         userId = preferences.getString("userId", null);
         if (userId == null || userId.length() < 32) {
             preferences.edit().putString("userId", userId = generateUserID()).apply();
         }
 
-        // Wrap Firebase Analytics init in try-catch — a missing, stub, or
-        // malformed google-services.json causes FirebaseApp to throw
-        // IllegalStateException which would otherwise kill the process.
-        try {
-            firebaseAnalytics = FirebaseAnalytics.getInstance(application);
-            firebaseAnalytics.setAnalyticsCollectionEnabled(true);
-            firebaseAnalytics.setUserId(userId);
-        } catch (Exception e) {
-            FileLog.e("Firebase Analytics init failed (non-fatal): " + e.getMessage());
-            firebaseAnalytics = null;
-            // Do not disable analytics entirely — Sentry still works below.
+        // Skip Firebase on emulators — CI images have outdated Google Play Services
+        // which causes FirebaseAnalytics.getInstance() to trigger a crash loop.
+        // Real devices have up-to-date GMS and are unaffected by this guard.
+        if (!isEmulator()) {
+            try {
+                firebaseAnalytics = FirebaseAnalytics.getInstance(application);
+                firebaseAnalytics.setAnalyticsCollectionEnabled(true);
+                firebaseAnalytics.setUserId(userId);
+            } catch (Exception e) {
+                FileLog.e("Firebase Analytics init failed (non-fatal): " + e.getMessage());
+                firebaseAnalytics = null;
+            }
+        } else {
+            FileLog.d("Analytics: emulator detected — skipping Firebase/GMS init");
         }
 
-        // Guard: only init Sentry when a valid DSN is configured.
-        // Without this check the app crashes on startup when SENTRY_DSN is
-        // empty or the string literal "null" (produced when sentryDsn is
-        // absent from local.properties at build time).
+        // Init Sentry only when a valid DSN is configured.
         String dsn = Extra.SENTRY_DSN;
         boolean hasDsn = dsn != null && !dsn.isEmpty()
                 && !"null".equals(dsn) && dsn.startsWith("https://");
@@ -76,6 +94,7 @@ public class AnalyticsHelper {
                 options.setTracesSampleRate(0.01);
             });
         }
+
         var user = new User();
         user.setId(userId);
         Sentry.setUser(user);
