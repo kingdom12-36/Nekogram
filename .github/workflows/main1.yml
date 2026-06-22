@@ -307,7 +307,7 @@ jobs:
           echo "Launch epoch: $LAUNCH_TS"
 
           $ADB logcat -c
-          $ADB logcat -b crash,main,system *:W > /tmp/smoke_logcat.txt 2>&1 &
+          $ADB logcat -b crash AndroidRuntime:E FATAL:E *:W > /tmp/smoke_logcat.txt 2>&1 &
           LOGCAT_PID=$!
 
           $ADB shell am start -n "$PKG/org.telegram.ui.LaunchActivity" \
@@ -361,7 +361,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         timeout-minutes: 12
         with:
-          api-level: 30
+          api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_3a
