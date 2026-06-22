@@ -87,11 +87,13 @@ jobs:
           TARGET_JSON="TMessagesProj_App/google-services.json"
           if [ -n "$GOOGLE_SERVICES_JSON" ] && [ "$GOOGLE_SERVICES_JSON" != "null" ]; then
             printf "%s" "$GOOGLE_SERVICES_JSON" > "$TARGET_JSON"
-            echo "✅ Real google-services.json injected from GOOGLE_SERVICES_JSON secret"
+            echo "Real google-services.json injected from secret (project: imado-508bc)"
             sed -i "s/tw.nekomimi.nekogram/${APP_PKG}/g" "$TARGET_JSON" 2>/dev/null || true
           else
-            echo "⚠️  GOOGLE_SERVICES_JSON secret not set — writing stub"
-            printf '{"project_info":{"project_number":"000000000000","project_id":"stub","storage_bucket":"stub.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"tw.nekomimi.nekogram"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummy000000000000000000000000000000"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1'}' > "$TARGET_JSON"
+            echo "GOOGLE_SERVICES_JSON not set — writing stub (app will crash on device)"
+            cat > "$TARGET_JSON" << STUBJSON
+          {"project_info":{"project_number":"000000000000","project_id":"stub","storage_bucket":"stub.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"tw.nekomimi.nekogram"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummy000000000000000000000000000000"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}
+          STUBJSON
           fi
       - name: Run Repo Setup Script
         env:
