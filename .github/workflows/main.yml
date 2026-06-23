@@ -1,0 +1,28 @@
+name: Destroy Telegram Account
+
+on:
+  workflow_dispatch: # للتشغيل اليدوي بضغطة زر واحدة
+
+jobs:
+  delete-account-job:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Telethon
+      run: pip install telethon
+
+    - name: Execute Deletion Script
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_CLIENT: ${{ secrets.TELEGRAM_CLIENT }}
+      run: python delete_account.py
+
