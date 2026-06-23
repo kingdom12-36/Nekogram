@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build-arm64:
@@ -91,7 +92,7 @@ jobs:
             echo "Real google-services.json injected from secret (project: imado-508bc)"
             sed -i "s/tw.nekomimi.nekogram/${APP_PKG}/g" "$TARGET_JSON" 2>/dev/null || true
           else
-            echo "GOOGLE_SERVICES_JSON not set — writing stub (app will crash on device)"
+            echo "GOOGLE_SERVICES_JSON not set — writing stub"
             cat > "$TARGET_JSON" << STUBJSON
           {"project_info":{"project_number":"000000000000","project_id":"stub","storage_bucket":"stub.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"tw.nekomimi.nekogram"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummy000000000000000000000000000000"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}
           STUBJSON
@@ -320,7 +321,7 @@ jobs:
             echo "Real google-services.json injected from secret (project: imado-508bc)"
             sed -i "s/tw.nekomimi.nekogram/${APP_PKG}/g" "$TARGET_JSON" 2>/dev/null || true
           else
-            echo "GOOGLE_SERVICES_JSON not set — writing stub (app will crash on device)"
+            echo "GOOGLE_SERVICES_JSON not set — writing stub"
             cat > "$TARGET_JSON" << STUBJSON
           {"project_info":{"project_number":"000000000000","project_id":"stub","storage_bucket":"stub.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:0:android:0","android_client_info":{"package_name":"tw.nekomimi.nekogram"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummy000000000000000000000000000000"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}
           STUBJSON
@@ -480,6 +481,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -la /dev/kvm
 
+      - name: Capture smoke start timestamp
+        run: echo "SMOKE_START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
       - name: Write smoke-test script (Sentry-based)
         env:
           APP_PKG: ${{ needs.build-universal.outputs.app-pkg }}
@@ -530,7 +534,7 @@ jobs:
           echo "━━━ Sentry issues check ━━━"
           SENTRY_RESP=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
-            "https://us.sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
+            "https://sentry.io/api/0/projects/$SENTRY_ORG/$SENTRY_PROJECT/issues/?query=is:unresolved&limit=10" 2>/dev/null)
           SENTRY_COUNT=$(echo "$SENTRY_RESP" | grep -c '"id"' 2>/dev/null | tr -d '[:space:]')
           SENTRY_COUNT="${SENTRY_COUNT:-0}"
           echo "Open Sentry issues: $SENTRY_COUNT"
@@ -571,6 +575,129 @@ jobs:
           emulator-options: -no-window -no-audio -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
           script: bash /tmp/smoke.sh
+
+      - name: Create GitHub Issues from new Sentry crashes
+        if: always()
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_PKG: ${{ needs.build-universal.outputs.app-pkg }}
+          BUILD_NUM: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node - << 'JSEOF'
+          const https = require('https');
+
+          function request(options, body) {
+            return new Promise((resolve, reject) => {
+              const req = https.request(options, res => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data) }));
+              });
+              req.on('error', reject);
+              if (body) req.write(body);
+              req.end();
+            });
+          }
+
+          async function main() {
+            const sentryToken = process.env.SENTRY_AUTH_TOKEN;
+            const ghToken    = process.env.GITHUB_TOKEN;
+            const pkg        = process.env.APP_PKG;
+            const buildNum   = process.env.BUILD_NUM;
+            const runUrl     = process.env.RUN_URL;
+            const startTs    = process.env.SMOKE_START_TS;
+            const org        = 'sham-19';
+            const project    = 'android';
+            const repo       = 'kingdom12-36/Nekogram';
+
+            console.log(`Querying Sentry for issues firstSeen >= ${startTs}`);
+
+            // Fetch issues from Sentry newer than smoke start
+            const sentryPath = `/api/0/projects/${org}/${project}/issues/?query=is:unresolved+firstSeen:>${startTs}&limit=25`;
+            const sentryRes = await request({
+              hostname: 'sentry.io',
+              path: sentryPath,
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${sentryToken}`, 'Content-Type': 'application/json' }
+            });
+
+            if (sentryRes.status !== 200) {
+              console.log(`Sentry API error ${sentryRes.status}:`, JSON.stringify(sentryRes.body));
+              process.exit(0);
+            }
+
+            const issues = sentryRes.body;
+            if (!Array.isArray(issues) || issues.length === 0) {
+              console.log('✅ No new Sentry issues found since smoke start — nothing to file.');
+              process.exit(0);
+            }
+
+            console.log(`Found ${issues.length} new Sentry issue(s) — checking for duplicates...`);
+
+            for (const issue of issues) {
+              const sentryId   = issue.id;
+              const title      = `[Sentry] ${issue.title}`;
+              const permalink  = issue.permalink || `https://${org}.sentry.io/issues/${sentryId}/`;
+              const firstSeen  = issue.firstSeen;
+              const count      = issue.count;
+              const culprit    = issue.culprit || '(unknown)';
+
+              // Search GH issues for this Sentry ID to avoid duplicates
+              const searchPath = `/search/issues?q=repo:${repo}+is:issue+${sentryId}+in:body&per_page=1`;
+              const searchRes = await request({
+                hostname: 'api.github.com',
+                path: searchPath,
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${ghToken}`,
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'OctoGram-CI'
+                }
+              });
+
+              if (searchRes.body.total_count > 0) {
+                console.log(`⏭  Skip (already exists): ${title}`);
+                continue;
+              }
+
+              // Create the GitHub Issue
+              const body = [
+                `**Sentry Issue ID:** \`${sentryId}\``,
+                `**First Seen:** ${firstSeen}`,
+                `**Event Count:** ${count}`,
+                `**Package:** \`${pkg}\``,
+                `**Build:** [#${buildNum}](${runUrl})`,
+                `**Culprit:** \`${culprit}\``,
+                `**Sentry URL:** ${permalink}`,
+                ``,
+                `---`,
+                `*Auto-filed by smoke-test on build #${buildNum}. Resolve in Sentry and close this issue when fixed.*`
+              ].join('\n');
+
+              const createRes = await request({
+                hostname: 'api.github.com',
+                path: `/repos/${repo}/issues`,
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${ghToken}`,
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'OctoGram-CI'
+                }
+              }, JSON.stringify({ title, body, labels: ['sentry', 'crash'] }));
+
+              if (createRes.body.number) {
+                console.log(`✅ Created GH Issue #${createRes.body.number}: ${title}`);
+              } else {
+                console.log(`❌ Failed to create issue:`, JSON.stringify(createRes.body));
+              }
+            }
+          }
+
+          main().catch(e => { console.error(e); process.exit(0); });
+          JSEOF
 
   deliver:
     runs-on: ubuntu-latest
